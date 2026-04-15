@@ -7,6 +7,7 @@ services:
     autoDeploy: true
     buildCommand: npm ci --omit=dev --no-audit --no-fund && rm -rf src && cp -r .medusa/server/public public
     startCommand: npm run start -- --host 0.0.0.0 --port $PORT
+    healthCheckPath: /health
     envVars:
       - key: NODE_ENV
         value: production
