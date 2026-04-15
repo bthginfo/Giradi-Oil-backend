@@ -49,13 +49,17 @@ const config = defineConfig({
         ],
       },
     },
-    {
-      key: Modules.EVENT_BUS,
-      resolve: "@medusajs/event-bus-redis",
-      options: {
-        redisUrl,
-      },
-    },
+    ...(redisUrl
+      ? [
+          {
+            key: Modules.EVENT_BUS,
+            resolve: "@medusajs/event-bus-redis",
+            options: {
+              redisUrl,
+            },
+          },
+        ]
+      : []),
   ],
 })
 
