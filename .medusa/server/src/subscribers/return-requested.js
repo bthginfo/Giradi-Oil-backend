@@ -36,7 +36,7 @@ async function returnRequestedHandler({ event, container, }) {
       <p style="text-align:center;color:#666;font-size:13px;margin-top:24px;">The Girardi Oil / 1000 Horia</p>
     </div>`;
         await resend.emails.send({
-            from: process.env.RESEND_FROM || "onboarding@resend.dev",
+            from: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
             to: order.email,
             subject: `Rücksendung für Bestellung #${order.display_id} – The Girardi Oil`,
             html,

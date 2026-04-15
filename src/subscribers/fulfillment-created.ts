@@ -82,7 +82,7 @@ export default async function fulfillmentCreatedHandler({
     </div>`
 
     await resend.emails.send({
-      from: process.env.RESEND_FROM || "onboarding@resend.dev",
+      from: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
       to: order.email,
       subject: `Deine Bestellung #${order.display_id} wurde versendet – The Girardi Oil`,
       html,

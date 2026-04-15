@@ -60,7 +60,7 @@ export default async function orderCanceledHandler({
     </div>`
 
     await resend.emails.send({
-      from: process.env.RESEND_FROM || "onboarding@resend.dev",
+      from: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
       to: order.email,
       subject: `Bestellung #${order.display_id} storniert – The Girardi Oil`,
       html,
