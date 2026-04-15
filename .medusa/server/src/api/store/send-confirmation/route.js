@@ -1,87 +1,124 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.POST = POST;
+const resend_1 = require("resend");
+const resend = new resend_1.Resend(process.env.RESEND_API_KEY);
 async function POST(req, res) {
-    console.log("========== SEND-CONFIRMATION CALLED ==========");
-    const { order_id, email } = req.body;
-    if (!order_id && !email) {
-        console.log("No order_id or email provided");
-        return res.status(400).json({ error: "order_id or email required" });
-    }
-    console.log("Order ID:", order_id, "| Email:", email);
-    console.log("RESEND_API_KEY set:", !!process.env.RESEND_API_KEY);
     try {
+        const { order_id } = req.body;
+        if (!order_id) {
+            return res.status(400).json({ message: "order_id is required" });
+        }
         const query = req.scope.resolve("query");
-        let order = null;
-        if (order_id) {
-            const { data: [found] } = await query.graph({
-                entity: "order",
-                fields: ["id", "display_id", "email", "total", "currency_code", "items.*", "shipping_address.*"],
-                filters: { id: order_id },
-            });
-            order = found;
-        }
-        if (!order && email) {
-            console.log("Looking up most recent order for email:", email);
-            const { data: orders } = await query.graph({
-                entity: "order",
-                fields: ["id", "display_id", "email", "total", "currency_code", "items.*", "shipping_address.*"],
-                filters: { email },
-            });
-            if (orders?.length) {
-                order = orders.sort((a, b) => (b.display_id || 0) - (a.display_id || 0))[0];
-                console.log("Found order by email:", order.id, "display_id:", order.display_id);
-            }
-        }
-        if (!order || !order.email) {
-            console.log("Order not found");
-            return res.status(404).json({ error: "Order not found" });
-        }
-        console.log("Sending email to:", order.email);
-        const itemsHtml = (order.items || []).map((item) => "<tr><td style=\"padding: 8px; border-bottom: 1px solid #eee;\">" + item.title + " x" + item.quantity + "</td><td style=\"padding: 8px; border-bottom: 1px solid #eee; text-align: right;\">" + (Number(item.total) / 100).toFixed(2) + " EUR</td></tr>").join("");
-        const addr = order.shipping_address;
-        const addressHtml = addr
-            ? "<p>" + [addr.first_name, addr.last_name].join(" ") + "<br/>" + addr.address_1 + (addr.address_2 ? "<br/>" + addr.address_2 : "") + "<br/>" + addr.postal_code + " " + addr.city + "<br/>" + addr.country_code?.toUpperCase() + "</p>"
-            : "";
-        const emailHtml = [
-            "<div style=\"font-family: Georgia, serif; max-width: 600px; margin: 0 auto; background: #FAF8F3; padding: 40px;\">",
-            "<div style=\"text-align: center; margin-bottom: 30px;\">",
-            "<h1 style=\"color: #275425; margin: 0;\">The Girardi Oil</h1>",
-            "<p style=\"color: #C5A572; margin: 5px 0;\">1000 Horia</p>",
-            "</div>",
-            "<h2 style=\"color: #275425;\">Vielen Dank für deine Bestellung!</h2>",
-            "<p>Bestellnummer: <strong>#" + order.display_id + "</strong></p>",
-            "<table style=\"width: 100%; border-collapse: collapse; margin: 20px 0;\">" + itemsHtml + "</table>",
-            "<p style=\"font-size: 18px;\">Gesamtbetrag: <strong>" + (Number(order.total) / 100).toFixed(2) + " EUR</strong></p>",
-            "<h3 style=\"color: #275425;\">Lieferadresse</h3>",
-            addressHtml,
-            "<div style=\"background: #275425; color: white; padding: 20px; margin-top: 30px; border-radius: 8px;\">",
-            "<h3 style=\"margin-top: 0; color: #C5A572;\">Nächster Schritt</h3>",
-            "<p style=\"margin-bottom: 0;\">Wir melden uns bei dir mit den Zahlungsinformationen per E-Mail.</p>",
-            "</div>",
-            "<p style=\"color: #888; font-size: 12px; margin-top: 30px; text-align: center;\">The Girardi Oil / 1000 Horia</p>",
-            "</div>",
-        ].join("");
-        const emailRes = await fetch("https://api.resend.com/emails", {
-            method: "POST",
-            headers: {
-                Authorization: "Bearer " + process.env.RESEND_API_KEY,
-                "Content-Type": "application/json",
-            },
-            body: JSON.stringify({
-                from: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
-                to: order.email,
-                subject: "Bestellbestätigung #" + order.display_id + " - The Girardi Oil",
-                html: emailHtml,
-            }),
+        const { data: [order] } = await query.graph({
+            entity: "order",
+            filters: { id: order_id },
+            fields: [
+                "id",
+                "display_id",
+                "email",
+                "total",
+                "subtotal",
+                "shipping_total",
+                "tax_total",
+                "currency_code",
+                "items.*",
+                "shipping_address.*",
+            ],
         });
-        const result = await emailRes.json();
-        console.log("Resend response:", JSON.stringify(result));
-        return res.json({ success: true, email_sent: true, result });
+        if (!order) {
+            return res.status(404).json({ message: "Order not found" });
+        }
+        const currencyCode = (order.currency_code || "EUR").toUpperCase();
+        // Helper: Cents → EUR formatiert (z.B. 1490 → "14,90")
+        const fmt = (cents) => (cents / 100).toFixed(2).replace(".", ",");
+        const itemRows = (order.items || [])
+            .map((item) => {
+            const unitPrice = fmt(Number(item.unit_price || 0));
+            const lineTotal = fmt(Number(item.unit_price || 0) * Number(item.quantity || 1));
+            return `
+          <tr>
+            <td style="padding: 8px 0; border-bottom: 1px solid #3a3a2a;">
+              ${item.title}<br><span style="color: #999; font-size: 13px;">x${item.quantity} à ${unitPrice} ${currencyCode}</span>
+            </td>
+            <td style="padding: 8px 0; border-bottom: 1px solid #3a3a2a; text-align: right;">
+              ${lineTotal} ${currencyCode}
+            </td>
+          </tr>`;
+        })
+            .join("");
+        const subtotal = fmt(Number(order.subtotal || 0));
+        const shipping = fmt(Number(order.shipping_total || 0));
+        const tax = fmt(Number(order.tax_total || 0));
+        const total = fmt(Number(order.total || 0));
+        const addr = order.shipping_address;
+        // Versandart erkennen
+        const isPickup = Number(order.shipping_total || 0) === 0;
+        const shippingLabel = isPickup ? "Abholung (gratis)" : `${shipping} ${currencyCode}`;
+        const html = `
+    <div style="max-width: 480px; margin: 0 auto; background: #1a1a14; color: #FAF8F3; font-family: Georgia, serif; padding: 32px; border-radius: 12px;">
+      <div style="text-align: center; margin-bottom: 24px;">
+        <h1 style="color: #C5A572; margin: 0; font-size: 28px;">The Girardi Oil</h1>
+        <p style="color: #7a9a58; margin: 4px 0 0;">1000 Horia</p>
+      </div>
+
+      <h2 style="color: #7a9a58; font-size: 22px;">Vielen Dank für deine Bestellung!</h2>
+      <p style="margin: 0 0 16px;">Bestellnummer: <strong>#${order.display_id}</strong></p>
+
+      <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">
+        ${itemRows}
+      </table>
+
+      <table style="width: 100%; font-size: 14px; margin-bottom: 8px;">
+        <tr>
+          <td style="padding: 4px 0; color: #ccc;">Zwischensumme</td>
+          <td style="padding: 4px 0; text-align: right;">${subtotal} ${currencyCode}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #ccc;">Versand</td>
+          <td style="padding: 4px 0; text-align: right;">${shippingLabel}</td>
+        </tr>
+        <tr>
+          <td style="padding: 4px 0; color: #ccc;">MwSt.</td>
+          <td style="padding: 4px 0; text-align: right;">${tax} ${currencyCode}</td>
+        </tr>
+      </table>
+
+      <p style="font-size: 18px; margin: 16px 0; border-top: 2px solid #C5A572; padding-top: 12px;">
+        Gesamtbetrag: <strong style="color: #C5A572;">${total} ${currencyCode}</strong>
+      </p>
+
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Lieferadresse</h3>
+      <p style="margin: 0; line-height: 1.6;">
+        ${addr?.first_name || ""} ${addr?.last_name || ""}<br>
+        ${addr?.address_1 || ""}<br>
+        ${addr?.postal_code || ""} ${addr?.city || ""}<br>
+        ${addr?.country_code?.toUpperCase() || ""}
+      </p>
+
+      <div style="background: #275425; padding: 16px; border-radius: 8px; margin: 24px 0;">
+        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">Nächster Schritt</p>
+        <p style="color: #FAF8F3; margin: 0; font-size: 14px;">
+          Wir melden uns bei dir mit den Zahlungsinformationen per E-Mail.
+        </p>
+      </div>
+
+      <p style="text-align: center; color: #666; font-size: 13px; margin-top: 24px;">
+        The Girardi Oil / 1000 Horia
+      </p>
+    </div>`;
+        await resend.emails.send({
+            from: process.env.RESEND_FROM || "onboarding@resend.dev",
+            to: order.email,
+            subject: `Bestellbestätigung #${order.display_id} – The Girardi Oil`,
+            html,
+        });
+        console.log(`✅ Order confirmation email sent to: ${order.email} – Total: ${total} ${currencyCode}`);
+        return res.json({ success: true, email_sent: true });
     }
     catch (error) {
-        console.error("Send confirmation error:", error);
-        return res.status(500).json({ error: "Failed to send email" });
+        console.error("❌ send-confirmation error:", error);
+        return res.status(500).json({ message: error.message });
     }
 }
-//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoicm91dGUuanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi8uLi8uLi8uLi8uLi8uLi9zcmMvYXBpL3N0b3JlL3NlbmQtY29uZmlybWF0aW9uL3JvdXRlLnRzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7O0FBRUEsb0JBaUdDO0FBakdNLEtBQUssVUFBVSxJQUFJLENBQUMsR0FBa0IsRUFBRSxHQUFtQjtJQUNoRSxPQUFPLENBQUMsR0FBRyxDQUFDLGdEQUFnRCxDQUFDLENBQUE7SUFFN0QsTUFBTSxFQUFFLFFBQVEsRUFBRSxLQUFLLEVBQUUsR0FBRyxHQUFHLENBQUMsSUFBNkMsQ0FBQTtJQUU3RSxJQUFJLENBQUMsUUFBUSxJQUFJLENBQUMsS0FBSyxFQUFFLENBQUM7UUFDeEIsT0FBTyxDQUFDLEdBQUcsQ0FBQywrQkFBK0IsQ0FBQyxDQUFBO1FBQzVDLE9BQU8sR0FBRyxDQUFDLE1BQU0sQ0FBQyxHQUFHLENBQUMsQ0FBQyxJQUFJLENBQUMsRUFBRSxLQUFLLEVBQUUsNEJBQTRCLEVBQUUsQ0FBQyxDQUFBO0lBQ3RFLENBQUM7SUFFRCxPQUFPLENBQUMsR0FBRyxDQUFDLFdBQVcsRUFBRSxRQUFRLEVBQUUsVUFBVSxFQUFFLEtBQUssQ0FBQyxDQUFBO0lBQ3JELE9BQU8sQ0FBQyxHQUFHLENBQUMscUJBQXFCLEVBQUUsQ0FBQyxDQUFDLE9BQU8sQ0FBQyxHQUFHLENBQUMsY0FBYyxDQUFDLENBQUE7SUFFaEUsSUFBSSxDQUFDO1FBQ0gsTUFBTSxLQUFLLEdBQUcsR0FBRyxDQUFDLEtBQUssQ0FBQyxPQUFPLENBQUMsT0FBTyxDQUFDLENBQUE7UUFDeEMsSUFBSSxLQUFLLEdBQVEsSUFBSSxDQUFBO1FBRXJCLElBQUksUUFBUSxFQUFFLENBQUM7WUFDYixNQUFNLEVBQUUsSUFBSSxFQUFFLENBQUMsS0FBSyxDQUFDLEVBQUUsR0FBRyxNQUFNLEtBQUssQ0FBQyxLQUFLLENBQUM7Z0JBQzFDLE1BQU0sRUFBRSxPQUFPO2dCQUNmLE1BQU0sRUFB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
+//# sourceMappingURL=data:application/json;base64,eyJ2ZXJzaW9uIjozLCJmaWxlIjoicm91dGUuanMiLCJzb3VyY2VSb290IjoiIiwic291cmNlcyI6WyIuLi8uLi8uLi8uLi8uLi8uLi9zcmMvYXBpL3N0b3JlL3NlbmQtY29uZmlybWF0aW9uL3JvdXRlLnRzIl0sIm5hbWVzIjpbXSwibWFwcGluZ3MiOiI7O0FBS0Esb0JBaUlDO0FBcklELG1DQUErQjtBQUUvQixNQUFNLE1BQU0sR0FBRyxJQUFJLGVBQU0sQ0FBQyxPQUFPLENBQUMsR0FBRyxDQUFDLGNBQWMsQ0FBQyxDQUFBO0FBRTlDLEtBQUssVUFBVSxJQUFJLENBQUMsR0FBa0IsRUFBRSxHQUFtQjtJQUNoRSxJQUFJLENBQUM7UUFDSCxNQUFNLEVBQUUsUUFBUSxFQUFFLEdBQUcsR0FBRyxDQUFDLElBQTRCLENBQUE7UUFFckQsSUFBSSxDQUFDLFFBQVEsRUFBRSxDQUFDO1lBQ2QsT0FBTyxHQUFHLENBQUMsTUFBTSxDQUFDLEdBQUcsQ0FBQyxDQUFDLElBQUksQ0FBQyxFQUFFLE9BQU8sRUFBRSxzQkFBc0IsRUFBRSxDQUFDLENBQUE7UUFDbEUsQ0FBQztRQUVELE1BQU0sS0FBSyxHQUFHLEdBQUcsQ0FBQyxLQUFLLENBQUMsT0FBTyxDQUFDLE9BQU8sQ0FBQyxDQUFBO1FBRXhDLE1BQU0sRUFBRSxJQUFJLEVBQUUsQ0FBQyxLQUFLLENBQUMsRUFBRSxHQUFHLE1BQU0sS0FBSyxDQUFDLEtBQUssQ0FBQztZQUMxQyxNQUFNLEVBQUUsT0FBTztZQUNmLE9BQU8sRUFBRSxFQUFFLEVBQUUsRUFBRSxRQUFRLEVBQUU7WUFDekIsTUFBTSxFQUFFO2dCQUNOLElBQUk7Z0JBQ0osWUFBWTtnQkFDWixPQUFPO2dCQUNQLE9BQU87Z0JBQ1AsVUFBVTtnQkFDVixnQkFBZ0I7Z0JBQ2hCLFdBQVc7Z0JBQ1gsZUFBZTtnQkFDZixTQUFTO2dCQUNULG9CQUFvQjthQUNyQjtTQUNGLENBQUMsQ0FBQTtRQUVGLElBQUksQ0FBQyxLQUFLLEVBQUUsQ0FBQztZQUNYLE9BQU8sR0FBRyxDQUFDLE1BQU0sQ0FBQyxHQUFHLENBQUMsQ0FBQyxJQUFJLENBQUMsRUFBRSxPQUFPLEVBQUUsaUJBQWlCLEVBQUUsQ0FBQyxDQUFBO1FBQzdELENBQUM7UUFFRCxNQUFNLFlBQVksR0FBRyxDQUFDLEtBQUssQ0FBQyxhQUFhLElBQUksS0FBSyxDQUFDLENBQUMsV0FBVyxFQUFFLENBQUE7UUFFakUsdURBQXVEO1FBQ3ZELE1BQU0sR0FBRyxHQUFHLENBQUMsS0FBYSxFQUFFLEVBQUUsQ0FDNUIsQ0FBQyxLQUFLLEdBQUcsR0FBRyxDQUFDLENBQUMsT0FBTyxDQUFDLENBQUMsQ0FBQyxDQUFDLE9BQU8sQ0FBQyxHQUFHLEVBQUUsR0FBRyxDQUFDLENBQUE7UUFFNUMsTUFBTSxRQUFRLEdBQUcsQ0FBQyxLQUFLLENBQUMsS0FBSyxJQUFJLEVBQUUsQ0FBQzthQUNqQyxHQUFHLENBQUMsQ0FBQyxJQUFTLEVBQUUsRUFBRTtZQUNqQixNQUFNLFNBQVMsR0FBRyxHQUFHLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyxVQUFVLElBQUksQ0FBQyxDQUFDLENBQUMsQ0FBQTtZQUNuRCxNQUFNLFNBQVMsR0FBRyxHQUFHLENBQUMsTUFBTSxDQUFDLElBQUksQ0FBQyxVQUFVLElBQUksQ0FBQyxDQUFDLEdBQUcsTUFBTSxDQUFDLElBQUksQ0FBQyxRQUFRLElBQUksQ0FBQyxDQUFDLENBQUMsQ0FBQTtZQUNoRixPQUFPOzs7Z0JBR0MsSUFBSSxDQUFDLEtBQUssb0RBQW9ELElBQUksQ0FBQyxRQUFRLE1BQU0sU0FBUyxJQUFJLFlBQVk7OztnQkFHMUcsU0FBUyxJQUFJLFlBQVk7O2dCQUV6QixDQUFBO1FBQ1YsQ0FBQyxDQUFDO2FBQ0QsSUFBSSxDQUFDLEVBQUUsQ0FBQyxDQUFBO1FBRVgsTUFBTSxRQUFRLEdBQUcsR0FBRyxDQUFDLE1BQU0sQ0FBQyxLQUFLLENBQUMsUUFBUSxJQUFJLENBQUMsQ0FBQyxDQUFDLENBQUE7UUFDakQsTUFBTSxRQUFRLEdBQUcsR0FBRyxDQUFDLE1BQU0sQ0FBQyxLQUFLLENBQUMsY0FBYyxJQUFJLENBQUMsQ0FBQyxDQUFDLENBQUE7UUFDdkQsTUFBTSxHQUFHLEdBQUcsR0FBRyxDQUFDLE1BQU0sQ0FBQyxLQUFLLENBQUMsU0FBUyxJQUFJLENBQUMsQ0FBQyxDQUFDLENBQUE7UUFDN0MsTUFBTSxLQUFLLEdBQUcsR0FBRyxDQUFDLE1BQU0sQ0FBQyxLQUFLLENBQUMsS0FBSyxJQUFJLENBQUMsQ0FBQyxDQUFDLENBQUE7UUFDM0MsTUFBTSxJQUFJLEdBQUcsS0FBSyxDQUFDLGdCQUFnQixDQUFBO1FBRW5DLHNCQUFzQjtRQUN0QixNQUFNLFFBQVEsR0FBRyxNQUFNLENBQUMsS0FBSyxDQUFDLGNBQWMsSUFBSSxDQUFDLENBQUMsS0FBSyxDQUFDLENBQUE7UUFDeEQsTUFBTSxhQUFhLEdBQUcsUUFBUSxDQUFDLENBQUMsQ0FBQyxtQkFBbUIsQ0FBQyxDQUFDLENBQUMsR0FBRyxRQUFRLElBQUksWUFBWSxFQUFFLENBQUE7UUFFcEYsTUFBTSxJQUFJLEdBQUc7Ozs7Ozs7OzZEQVE0QyxLQUFLLENBQUMsVUFBVTs7O1VBR25FLFFBQVE7Ozs7OzsyREFNeUMsUUFBUSxJQUFJLFlBQVk7Ozs7MkRBSXhCLGFBQWE7Ozs7MkRBSWIsR0FBRyxJQUFJLFlBQVk7Ozs7O3dEQUt0QixLQUFLLElBQUksWUFBWTs7Ozs7VUFLbkUsSUFBSSxFQUFFLFVBQVUsSUFBSSxFQUFFLElBQUksSUFBSSxFQUFFLFNBQVMsSUFBSSxFQUFFO1VBQy9DLElBQUksRUFBRSxTQUFTLElBQUksRUFBRTtVQUNyQixJQUFJLEVBQUUsV0FBVyxJQUFJLEVBQUUsSUFBSSxJQUFJLEVBQUUsSUFBSSxJQUFJLEVBQUU7VUFDM0MsSUFBSSxFQUFFLFlBQVksRUFBRSxXQUFXLEVBQUUsSUFBSSxFQUFFOzs7Ozs7Ozs7Ozs7O1dBYXRDLENBQUE7UUFFUCxNQUFNLE1BQU0sQ0FBQyxNQUFNLENBQUMsSUFBSSxDQUFDO1lBQ3ZCLElBQUksRUFBRSxPQUFPLENBQUMsR0FBRyxDQUFDLFdBQVcsSUFBSSx1QkFBdUI7WUFDeEQsRUFBRSxFQUFFLEtBQUssQ0FBQyxLQUFLO1lBQ2YsT0FBTyxFQUFFLHVCQUF1QixLQUFLLENBQUMsVUFBVSxvQkFBb0I7WUFDcEUsSUFBSTtTQUNMLENBQUMsQ0FBQTtRQUVGLE9BQU8sQ0FBQyxHQUFHLENBQUMsdUNBQXVDLEtBQUssQ0FBQyxLQUFLLGFBQWEsS0FBSyxJQUFJLFlBQVksRUFBRSxDQUFDLENBQUE7UUFDbkcsT0FBTyxHQUFHLENBQUMsSUFBSSxDQUFDLEVBQUUsT0FBTyxFQUFFLElBQUksRUFBRSxVQUFVLEVBQUUsSUFBSSxFQUFFLENBQUMsQ0FBQTtJQUN0RCxDQUFDO0lBQUMsT0FBTyxLQUFVLEVBQUUsQ0FBQztRQUNwQixPQUFPLENBQUMsS0FBSyxDQUFDLDRCQUE0QixFQUFFLEtBQUssQ0FBQyxDQUFBO1FBQ2xELE9BQU8sR0FBRyxDQUFDLE1BQU0sQ0FBQyxHQUFHLENBQUMsQ0FBQyxJQUFJLENBQUMsRUFBRSxPQUFPLEVBQUUsS0FBSyxDQUFDLE9BQU8sRUFBRSxDQUFDLENBQUE7SUFDekQsQ0FBQztBQUNILENBQUMifQ==

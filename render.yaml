@@ -5,7 +5,7 @@ services:
     rootDir: .
     plan: starter
     autoDeploy: true
-    buildCommand: npm install && npm run build
+    buildCommand: npm ci --omit=dev --no-audit --no-fund
     startCommand: npm run start
     envVars:
       - key: NODE_ENV
@@ -13,7 +13,7 @@ services:
       - key: NODE_VERSION
         value: 20
       - key: NPM_CONFIG_PRODUCTION
-        value: "false"
+        value: "true"
       - key: NODE_OPTIONS
         value: --max-old-space-size=400
       - key: PORT

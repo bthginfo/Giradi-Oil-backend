@@ -49,6 +49,7 @@ export default defineConfig({
       },
     },
     {
+      key: Modules.EVENT_BUS,
       resolve: "@medusajs/event-bus-redis",
       options: {
         redisUrl,
