@@ -60,4 +60,3 @@ const config = defineConfig({
 })
 
 module.exports = config
-module.exports.default = config
