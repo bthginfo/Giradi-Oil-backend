@@ -63,7 +63,7 @@ export default defineConfig({
             options: {
               providers: [
                 {
-                  resolve: "./.medusa/server/src/modules/paypal",
+                  resolve: "./src/modules/paypal",
                   id: "paypal",
                   options: {
                     clientId: process.env.PAYPAL_CLIENT_ID,
