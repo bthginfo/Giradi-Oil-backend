@@ -55,5 +55,26 @@ export default defineConfig({
         redisUrl,
       },
     },
+    ...(process.env.PAYPAL_CLIENT_ID
+      ? [
+          {
+            key: Modules.PAYMENT,
+            resolve: "@medusajs/payment",
+            options: {
+              providers: [
+                {
+                  resolve: "./src/modules/paypal",
+                  id: "paypal",
+                  options: {
+                    clientId: process.env.PAYPAL_CLIENT_ID,
+                    clientSecret: process.env.PAYPAL_CLIENT_SECRET,
+                    sandbox: process.env.PAYPAL_SANDBOX !== "false",
+                  },
+                },
+              ],
+            },
+          },
+        ]
+      : []),
   ],
 })
