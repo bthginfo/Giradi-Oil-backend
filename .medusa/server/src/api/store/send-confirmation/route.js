@@ -31,7 +31,7 @@ async function POST(req, res) {
         }
         const currencyCode = (order.currency_code || "EUR").toUpperCase();
         // Helper: Cents → EUR formatiert (z.B. 1490 → "14,90")
-        const fmt = (cents) => (cents / 100).toFixed(2).replace(".", ",");
+        const fmt = (cents) => (cents).toFixed(2).replace(".", ",");
         const itemRows = (order.items || [])
             .map((item) => {
             const unitPrice = fmt(Number(item.unit_price || 0));
