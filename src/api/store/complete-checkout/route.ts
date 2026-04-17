@@ -2,7 +2,10 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { completeCartWorkflow } from "@medusajs/medusa/core-flows"
 
 /**
- * Custom cart-complete endpoint with better error reporting.
+ * All-in-one checkout endpoint.
+ * Creates payment collection + session, authorizes payment, and completes cart
+ * in a single request to minimise frontend round-trips.
+ *
  * POST /store/complete-checkout
  * Body: { cart_id: string }
  */
@@ -14,7 +17,6 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
   }
 
   try {
-    // Use the Medusa Query to check cart state first
     const query = req.scope.resolve("query")
     const { data: [cart] } = await query.graph({
       entity: "cart",
@@ -39,37 +41,74 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       return res.status(404).json({ message: "Cart not found" })
     }
 
-    // Validate prerequisites
+    // Validate basic prerequisites
     const errors: string[] = []
     if (!cart.email) errors.push("Email is missing")
     if (!cart.items?.length) errors.push("Cart has no items")
     if (!cart.shipping_methods?.length) errors.push("No shipping method selected")
-    if (!cart.payment_collection) errors.push("No payment collection")
-    if (!cart.payment_collection?.payment_sessions?.length) errors.push("No payment session")
 
     if (errors.length > 0) {
-      return res.status(400).json({
-        message: "Cart is not ready for completion",
-        errors,
-        cart_state: {
-          email: cart.email,
-          items: cart.items?.length || 0,
-          shipping_methods: cart.shipping_methods?.length || 0,
-          payment_collection: cart.payment_collection?.id || null,
-          payment_sessions: cart.payment_collection?.payment_sessions?.map((s: any) => ({
-            id: s.id,
-            status: s.status,
-            provider_id: s.provider_id,
-          })) || [],
-        },
-      })
+      return res.status(400).json({ message: "Cart is not ready for completion", errors })
     }
 
-    // Try to authorize payment session first if it's pending
-    const paymentSession = cart.payment_collection.payment_sessions[0]
+    // ---- Step 1: Ensure payment collection exists ----
+    let paymentCollectionId = cart.payment_collection?.id
+    if (!paymentCollectionId) {
+      console.log("[CustomCheckout] Creating payment collection for cart", cart_id)
+      const PORT = process.env.PORT || 9000
+      const pcRes = await globalThis.fetch(
+        `http://localhost:${PORT}/store/payment-collections`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-publishable-api-key": req.headers["x-publishable-api-key"] as string || "",
+          },
+          body: JSON.stringify({ cart_id }),
+        }
+      )
+      if (!pcRes.ok) {
+        const err = await pcRes.json().catch(() => ({}))
+        return res.status(400).json({ message: "Failed to create payment collection", error: err })
+      }
+      const pcData = await pcRes.json() as any
+      paymentCollectionId = pcData.payment_collection?.id
+      if (!paymentCollectionId) {
+        return res.status(400).json({ message: "Payment collection creation returned no ID" })
+      }
+    }
+
+    // ---- Step 2: Ensure payment session exists ----
+    let paymentSession = cart.payment_collection?.payment_sessions?.[0]
+    if (!paymentSession) {
+      console.log("[CustomCheckout] Creating payment session for collection", paymentCollectionId)
+      const PORT = process.env.PORT || 9000
+      const psRes = await globalThis.fetch(
+        `http://localhost:${PORT}/store/payment-collections/${paymentCollectionId}/payment-sessions`,
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-publishable-api-key": req.headers["x-publishable-api-key"] as string || "",
+          },
+          body: JSON.stringify({ provider_id: "pp_system_default" }),
+        }
+      )
+      if (!psRes.ok) {
+        const err = await psRes.json().catch(() => ({}))
+        return res.status(400).json({ message: "Failed to create payment session", error: err })
+      }
+      const psData = await psRes.json() as any
+      paymentSession = psData.payment_collection?.payment_sessions?.[0]
+      if (!paymentSession) {
+        return res.status(400).json({ message: "Payment session creation returned no session" })
+      }
+    }
+
+    // ---- Step 3: Authorize payment session if pending ----
     if (paymentSession.status === "pending") {
       try {
-        const paymentModuleService = req.scope.resolve("payment")
+        const paymentModuleService = req.scope.resolve("payment") as any
         await paymentModuleService.authorizePaymentSession(paymentSession.id, {})
         console.log(`[CustomCheckout] Authorized payment session ${paymentSession.id}`)
       } catch (authErr: any) {
@@ -81,7 +120,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       }
     }
 
-    // Now run the complete cart workflow
+    // ---- Step 4: Complete cart → create order ----
     const { result } = await completeCartWorkflow(req.scope).run({
       input: { id: cart_id },
     })
