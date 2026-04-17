@@ -42,7 +42,6 @@ async function POST(req, res) {
       return res.status(404).json({ message: "Cart not found" });
     }
 
-    // Validate each promo code
     for (const code of promo_codes) {
       const rule = PROMO_RULES[code.toUpperCase()];
       if (rule) {
@@ -53,28 +52,21 @@ async function POST(req, res) {
       }
     }
 
-    // All validations passed - apply via workflow
-    const { addPromotionsToCartWorkflow } = require("@medusajs/medusa/core-flows");
+    // Validation passed - proxy to Medusa's built-in promotions endpoint
+    const port = process.env.PORT || 9000;
+    const url = "http://localhost:" + port + "/store/carts/" + cart_id + "/promotions";
 
-    await addPromotionsToCartWorkflow(req.scope).run({
-      input: {
-        cart_id: cart_id,
-        promo_codes: promo_codes.map(function(c) { return c.toUpperCase(); }),
+    const response = await globalThis.fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "x-publishable-api-key": req.headers["x-publishable-api-key"] || "",
       },
+      body: JSON.stringify({ promo_codes: promo_codes }),
     });
 
-    // Fetch updated cart
-    const updated = await query.graph({
-      entity: "cart",
-      filters: { id: cart_id },
-      fields: [
-        "id", "total", "subtotal", "discount_total", "discount_subtotal",
-        "item_total", "shipping_total", "tax_total",
-        "items.*", "promotions.*", "promotions.application_method.*",
-      ],
-    });
-
-    return res.status(200).json({ cart: updated.data[0] });
+    const data = await response.json();
+    return res.status(response.status).json(data);
   } catch (err) {
     console.error("[ApplyPromo] Error:", err.message);
     return res.status(500).json({
