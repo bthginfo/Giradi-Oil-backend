@@ -24,7 +24,7 @@ async function fulfillmentCreatedHandler({ event, container, }) {
         }
         const order = fulfillment.order;
         const cc = (order.currency_code || "EUR").toUpperCase();
-        const fmt = (cents) => (cents / 100).toFixed(2).replace(".", ",");
+        const fmt = (cents) => (cents).toFixed(2).replace(".", ",");
         const addr = order.shipping_address;
         // Tracking-Info aus Labels
         const label = fulfillment.labels?.[0];
