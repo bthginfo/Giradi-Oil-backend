@@ -21,7 +21,7 @@ async function orderCanceledHandler({ event, container, }) {
             return;
         }
         const cc = (order.currency_code || "EUR").toUpperCase();
-        const fmt = (cents) => (cents / 100).toFixed(2).replace(".", ",");
+        const fmt = (cents) => (cents).toFixed(2).replace(".", ",");
         const addr = order.shipping_address;
         const itemRows = (order.items || [])
             .map((item) => `<tr>
