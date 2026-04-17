@@ -29,7 +29,7 @@ async function paymentCapturedHandler({ event, container, }) {
             return;
         }
         const cc = (order.currency_code || "EUR").toUpperCase();
-        const fmt = (cents) => (cents / 100).toFixed(2).replace(".", ",");
+        const fmt = (cents) => (cents).toFixed(2).replace(".", ",");
         const itemRows = (order.items || [])
             .map((item) => `<tr>
         <td style="padding:6px 0;border-bottom:1px solid #3a3a2a;">
