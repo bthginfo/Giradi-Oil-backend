@@ -25,7 +25,7 @@ async function orderPlacedHandler({ event, container, }) {
         // Falls Frontend die Mail schon geschickt hat, nicht nochmal senden
         // Sicherheitshalber senden wir trotzdem – doppelt hält besser bei Vorkasse
         const cc = (order.currency_code || "EUR").toUpperCase();
-        const fmt = (cents) => (cents / 100).toFixed(2).replace(".", ",");
+        const fmt = (cents) => (cents).toFixed(2).replace(".", ",");
         const itemRows = (order.items || [])
             .map((item) => {
             const lineTotal = fmt(Number(item.unit_price || 0) * Number(item.quantity || 1));
