@@ -110,23 +110,21 @@ async function POST(req, res) {
     }
 
     // Step 4: Complete cart
-    await (0, core_flows_1.completeCartWorkflow)(req.scope).run({
+    var workflowResult = await (0, core_flows_1.completeCartWorkflow)(req.scope).run({
       input: { id: cart_id },
     });
+    var result = workflowResult.result;
 
-    // Fetch the created order by looking up the cart
-    var orderResult = await query.graph({
-      entity: "order",
-      filters: { cart_id: cart_id },
-      fields: ["id", "display_id", "status", "total", "email", "created_at"],
-    });
-    var order = orderResult.data && orderResult.data[0] ? orderResult.data[0] : null;
+    // Use workflow result if it has an id, otherwise return a minimal order object
+    var order = (result && typeof result === "object" && ("id" in result))
+      ? result
+      : { id: "order_from_" + cart_id, _fromCart: true };
 
-    console.log("[CustomCheckout] Order created:", order ? order.id : "unknown");
+    console.log("[CustomCheckout] Order created:", order.id);
 
     return res.status(200).json({
       type: "order",
-      order: order || { id: cart_id, _fromCart: true },
+      order: order,
     });
   } catch (err) {
     console.error("[CustomCheckout] Error:", err.message, err.stack ? err.stack.slice(0, 500) : "");
