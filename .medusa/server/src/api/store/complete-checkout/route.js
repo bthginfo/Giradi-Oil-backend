@@ -2,6 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.POST = POST;
 const core_flows_1 = require("@medusajs/medusa/core-flows");
+const utils_1 = require("@medusajs/framework/utils");
 
 async function POST(req, res) {
   const { cart_id } = req.body;
@@ -36,58 +37,46 @@ async function POST(req, res) {
       return res.status(400).json({ message: "Cart is not ready for completion", errors: errors });
     }
 
-    // Step 1: Ensure payment collection exists
+    // Step 1: Ensure payment collection exists (direct workflow, no HTTP)
+    var remoteQuery = req.scope.resolve(utils_1.ContainerRegistrationKeys.REMOTE_QUERY);
     var paymentCollectionId = cart.payment_collection ? cart.payment_collection.id : null;
     if (!paymentCollectionId) {
       console.log("[CustomCheckout] Creating payment collection for cart", cart_id);
-      var PORT = process.env.PORT || 9000;
-      var pcRes = await globalThis.fetch(
-        "http://localhost:" + PORT + "/store/payment-collections",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-publishable-api-key": req.headers["x-publishable-api-key"] || "",
-          },
-          body: JSON.stringify({ cart_id: cart_id }),
-        }
-      );
-      if (!pcRes.ok) {
-        var pcErr = await pcRes.json().catch(function() { return {}; });
-        return res.status(400).json({ message: "Failed to create payment collection", error: pcErr });
-      }
-      var pcData = await pcRes.json();
-      paymentCollectionId = pcData.payment_collection ? pcData.payment_collection.id : null;
+      await (0, core_flows_1.createPaymentCollectionForCartWorkflow)(req.scope).run({
+        input: { cart_id: cart_id },
+      });
+      var rels = await remoteQuery((0, utils_1.remoteQueryObjectFromString)({
+        entryPoint: "cart_payment_collection",
+        variables: { filters: { cart_id: cart_id } },
+        fields: ["payment_collection.id", "payment_collection.payment_sessions.*"],
+      }));
+      var rel = rels[0];
+      paymentCollectionId = rel && rel.payment_collection ? rel.payment_collection.id : null;
       if (!paymentCollectionId) {
         return res.status(400).json({ message: "Payment collection creation returned no ID" });
       }
     }
 
-    // Step 2: Ensure payment session exists
+    // Step 2: Ensure payment session exists (direct workflow, no HTTP)
     var paymentSession = (cart.payment_collection && cart.payment_collection.payment_sessions && cart.payment_collection.payment_sessions.length)
       ? cart.payment_collection.payment_sessions[0]
       : null;
     if (!paymentSession) {
       console.log("[CustomCheckout] Creating payment session for collection", paymentCollectionId);
-      var PORT2 = process.env.PORT || 9000;
-      var psRes = await globalThis.fetch(
-        "http://localhost:" + PORT2 + "/store/payment-collections/" + paymentCollectionId + "/payment-sessions",
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-publishable-api-key": req.headers["x-publishable-api-key"] || "",
-          },
-          body: JSON.stringify({ provider_id: "pp_system_default" }),
-        }
-      );
-      if (!psRes.ok) {
-        var psErr = await psRes.json().catch(function() { return {}; });
-        return res.status(400).json({ message: "Failed to create payment session", error: psErr });
-      }
-      var psData = await psRes.json();
-      paymentSession = (psData.payment_collection && psData.payment_collection.payment_sessions && psData.payment_collection.payment_sessions.length)
-        ? psData.payment_collection.payment_sessions[0]
+      await (0, core_flows_1.createPaymentSessionsWorkflow)(req.scope).run({
+        input: {
+          payment_collection_id: paymentCollectionId,
+          provider_id: "pp_system_default",
+        },
+      });
+      var rels2 = await remoteQuery((0, utils_1.remoteQueryObjectFromString)({
+        entryPoint: "cart_payment_collection",
+        variables: { filters: { cart_id: cart_id } },
+        fields: ["payment_collection.payment_sessions.*"],
+      }));
+      var rel2 = rels2[0];
+      paymentSession = (rel2 && rel2.payment_collection && rel2.payment_collection.payment_sessions && rel2.payment_collection.payment_sessions.length)
+        ? rel2.payment_collection.payment_sessions[0]
         : null;
       if (!paymentSession) {
         return res.status(400).json({ message: "Payment session creation returned no session" });
@@ -115,7 +104,6 @@ async function POST(req, res) {
     });
     var result = workflowResult.result;
 
-    // Use workflow result if it has an id, otherwise return a minimal order object
     var order = (result && typeof result === "object" && ("id" in result))
       ? result
       : { id: "order_from_" + cart_id, _fromCart: true };

@@ -1,5 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { completeCartWorkflow } from "@medusajs/medusa/core-flows"
+import { completeCartWorkflow, createPaymentCollectionForCartWorkflow, createPaymentSessionsWorkflow } from "@medusajs/medusa/core-flows"
+import { ContainerRegistrationKeys, remoteQueryObjectFromString } from "@medusajs/framework/utils"
 
 /**
  * All-in-one checkout endpoint.
@@ -52,27 +53,19 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     // ---- Step 1: Ensure payment collection exists ----
+    const remoteQuery = req.scope.resolve(ContainerRegistrationKeys.REMOTE_QUERY)
     let paymentCollectionId = cart.payment_collection?.id
     if (!paymentCollectionId) {
       console.log("[CustomCheckout] Creating payment collection for cart", cart_id)
-      const PORT = process.env.PORT || 9000
-      const pcRes = await globalThis.fetch(
-        `http://localhost:${PORT}/store/payment-collections`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-publishable-api-key": req.headers["x-publishable-api-key"] as string || "",
-          },
-          body: JSON.stringify({ cart_id }),
-        }
-      )
-      if (!pcRes.ok) {
-        const err = await pcRes.json().catch(() => ({}))
-        return res.status(400).json({ message: "Failed to create payment collection", error: err })
-      }
-      const pcData = await pcRes.json() as any
-      paymentCollectionId = pcData.payment_collection?.id
+      await createPaymentCollectionForCartWorkflow(req.scope).run({
+        input: { cart_id },
+      })
+      const [rel] = await remoteQuery(remoteQueryObjectFromString({
+        entryPoint: "cart_payment_collection",
+        variables: { filters: { cart_id } },
+        fields: ["payment_collection.id", "payment_collection.payment_sessions.*"],
+      }))
+      paymentCollectionId = rel?.payment_collection?.id
       if (!paymentCollectionId) {
         return res.status(400).json({ message: "Payment collection creation returned no ID" })
       }
@@ -82,24 +75,19 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     let paymentSession = cart.payment_collection?.payment_sessions?.[0]
     if (!paymentSession) {
       console.log("[CustomCheckout] Creating payment session for collection", paymentCollectionId)
-      const PORT = process.env.PORT || 9000
-      const psRes = await globalThis.fetch(
-        `http://localhost:${PORT}/store/payment-collections/${paymentCollectionId}/payment-sessions`,
-        {
-          method: "POST",
-          headers: {
-            "Content-Type": "application/json",
-            "x-publishable-api-key": req.headers["x-publishable-api-key"] as string || "",
-          },
-          body: JSON.stringify({ provider_id: "pp_system_default" }),
-        }
-      )
-      if (!psRes.ok) {
-        const err = await psRes.json().catch(() => ({}))
-        return res.status(400).json({ message: "Failed to create payment session", error: err })
-      }
-      const psData = await psRes.json() as any
-      paymentSession = psData.payment_collection?.payment_sessions?.[0]
+      await createPaymentSessionsWorkflow(req.scope).run({
+        input: {
+          payment_collection_id: paymentCollectionId,
+          provider_id: "pp_system_default",
+        },
+      })
+      // Re-fetch to get the created session
+      const [rel] = await remoteQuery(remoteQueryObjectFromString({
+        entryPoint: "cart_payment_collection",
+        variables: { filters: { cart_id } },
+        fields: ["payment_collection.payment_sessions.*"],
+      }))
+      paymentSession = rel?.payment_collection?.payment_sessions?.[0]
       if (!paymentSession) {
         return res.status(400).json({ message: "Payment session creation returned no session" })
       }
