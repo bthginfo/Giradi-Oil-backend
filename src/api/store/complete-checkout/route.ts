@@ -121,15 +121,23 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     // ---- Step 4: Complete cart → create order ----
-    const { result } = await completeCartWorkflow(req.scope).run({
+    await completeCartWorkflow(req.scope).run({
       input: { id: cart_id },
     })
 
-    console.log(`[CustomCheckout] Order created:`, result)
+    // Fetch the created order by looking up the cart's completed order
+    const { data: orders } = await query.graph({
+      entity: "order",
+      filters: { cart_id },
+      fields: ["id", "display_id", "status", "total", "email", "created_at"],
+    })
+    const order = orders?.[0]
+
+    console.log(`[CustomCheckout] Order created:`, order?.id || "unknown")
 
     return res.status(200).json({
       type: "order",
-      order: result,
+      order: order || { id: cart_id, _fromCart: true },
     })
   } catch (err: any) {
     console.error("[CustomCheckout] Error:", err.message, err.stack?.slice(0, 500))
