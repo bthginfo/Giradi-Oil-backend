@@ -2,7 +2,6 @@ import { defineConfig, loadEnv, Modules } from "@medusajs/framework/utils"
 
 loadEnv(process.env.NODE_ENV || "development", process.cwd())
 
-const redisUrl = process.env.EVENTS_REDIS_URL || process.env.REDIS_URL
 const storeCors =
   process.env.STORE_CORS || "http://localhost:8000,https://docs.medusajs.com"
 const adminCors =
@@ -15,7 +14,6 @@ const authCors =
 export default defineConfig({
   projectConfig: {
     databaseUrl: process.env.DATABASE_URL || "postgres://localhost/medusa",
-    redisUrl,
     http: {
       storeCors,
       adminCors,
@@ -50,10 +48,7 @@ export default defineConfig({
     },
     {
       key: Modules.EVENT_BUS,
-      resolve: "@medusajs/event-bus-redis",
-      options: {
-        redisUrl,
-      },
+      resolve: "@medusajs/event-bus-local",
     },
     ...(process.env.PAYPAL_CLIENT_ID
       ? [
