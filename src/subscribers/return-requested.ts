@@ -1,7 +1,6 @@
 import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework"
-import { Resend } from "resend"
+import { sendMail } from "../lib/mailer"
 
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 export default async function returnRequestedHandler({
   event,
@@ -42,8 +41,7 @@ export default async function returnRequestedHandler({
       <p style="text-align:center;color:#666;font-size:13px;margin-top:24px;">The Girardi Oil / 1000 Horia</p>
     </div>`
 
-    await resend.emails.send({
-      from: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
+    await sendMail({
       to: order.email,
       subject: `Rücksendung für Bestellung #${order.display_id} – The Girardi Oil`,
       html,

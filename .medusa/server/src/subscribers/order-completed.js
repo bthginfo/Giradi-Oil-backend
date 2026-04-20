@@ -2,8 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.config = void 0;
 exports.default = orderCompletedHandler;
-const resend_1 = require("resend");
-const resend = new resend_1.Resend(process.env.RESEND_API_KEY);
+const mailer_1 = require("../lib/mailer");
 async function orderCompletedHandler({ event, container, }) {
     console.log("✅ [Subscriber] order.completed fired – order:", event.data.id);
     try {
@@ -49,8 +48,7 @@ async function orderCompletedHandler({ event, container, }) {
       </div>
       <p style="text-align:center;color:#666;font-size:13px;margin-top:24px;">The Girardi Oil / 1000 Horia</p>
     </div>`;
-        await resend.emails.send({
-            from: process.env.RESEND_FROM_EMAIL || "onboarding@resend.dev",
+        await (0, mailer_1.sendMail)({
             to: order.email,
             subject: `Bestellung #${order.display_id} abgeschlossen – The Girardi Oil`,
             html,

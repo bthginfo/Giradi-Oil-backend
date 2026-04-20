@@ -1,7 +1,6 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { Resend } from "resend"
+import { sendMail } from "../../lib/mailer"
 
-const resend = new Resend(process.env.RESEND_API_KEY)
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
@@ -119,8 +118,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       </p>
     </div>`
 
-    await resend.emails.send({
-      from: process.env.RESEND_FROM || "onboarding@resend.dev",
+    await sendMail({
       to: order.email,
       subject: `Bestellbestätigung #${order.display_id} – The Girardi Oil`,
       html,
