@@ -60,8 +60,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const total = fmt(Number(order.total || 0))
     const addr = order.shipping_address
 
-    const isPickup = Number(order.shipping_total || 0) === 0
-    const shippingLabel = isPickup ? "Abholung (gratis)" : `${shipping} ${currencyCode}`
+    const isPickup = (payment_method || "").toLowerCase() === "bar"
+    const isFreeShipping = !isPickup && Number(order.shipping_total || 0) === 0
+    const shippingLabel = isPickup ? "Abholung (gratis)" : isFreeShipping ? "Kostenloser Versand" : `${shipping} ${currencyCode}`
 
     // Payment-specific info block
     let paymentBlock = ""
@@ -139,6 +140,12 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         Gesamtbetrag: <strong style="color: #C5A572;">${total} ${currencyCode}</strong>
       </p>
 
+      ${isPickup ? `
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Abholung vor Ort</h3>
+      <p style="margin: 0; line-height: 1.6;">
+        ${addr?.first_name || ""} ${addr?.last_name || ""}
+      </p>
+      ` : `
       <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Lieferadresse</h3>
       <p style="margin: 0; line-height: 1.6;">
         ${addr?.first_name || ""} ${addr?.last_name || ""}<br>
@@ -146,6 +153,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         ${addr?.postal_code || ""} ${addr?.city || ""}<br>
         ${addr?.country_code?.toUpperCase() || ""}
       </p>
+      `}
 
       ${paymentBlock}
 

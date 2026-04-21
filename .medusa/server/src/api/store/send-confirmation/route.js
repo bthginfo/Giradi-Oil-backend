@@ -29,7 +29,7 @@ async function POST(req, res) {
       const lineTotal = fmt(Number(item.unit_price || 0) * Number(item.quantity || 1));
       return `<tr>
         <td style="padding: 8px 0; border-bottom: 1px solid #3a3a2a;">
-          ${item.title}<br><span style="color: #999; font-size: 13px;">x${item.quantity} à ${unitPrice} ${currencyCode}</span>
+          ${item.title}<br><span style="color: #999; font-size: 13px;">x${item.quantity} \u00e0 ${unitPrice} ${currencyCode}</span>
         </td>
         <td style="padding: 8px 0; border-bottom: 1px solid #3a3a2a; text-align: right;">
           ${lineTotal} ${currencyCode}
@@ -41,25 +41,26 @@ async function POST(req, res) {
     const tax = fmt(Number(order.tax_total || 0));
     const total = fmt(Number(order.total || 0));
     const addr = order.shipping_address;
-    const isPickup = Number(order.shipping_total || 0) === 0;
-    const shippingLabel = isPickup ? "Abholung (gratis)" : `${shipping} ${currencyCode}`;
 
-    // Payment-specific info block
+    const isPickup = (payment_method || "").toLowerCase() === "bar";
+    const isFreeShipping = !isPickup && Number(order.shipping_total || 0) === 0;
+    const shippingLabel = isPickup ? "Abholung (gratis)" : isFreeShipping ? "Kostenloser Versand" : `${shipping} ${currencyCode}`;
+
     var paymentBlock = "";
     var pm = (payment_method || "").toLowerCase();
     if (pm === "paypal") {
       paymentBlock = `<div style="background: #275425; padding: 16px; border-radius: 8px; margin: 24px 0;">
-        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">✅ Zahlung erhalten</p>
+        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">\u2705 Zahlung erhalten</p>
         <p style="color: #FAF8F3; margin: 0; font-size: 14px;">
-          Deine Zahlung über PayPal wurde erfolgreich verarbeitet. Wir bereiten deine Bestellung jetzt für den Versand vor.
+          Deine Zahlung \u00fcber PayPal wurde erfolgreich verarbeitet. Wir bereiten deine Bestellung jetzt f\u00fcr den Versand vor.
         </p>
       </div>`;
     } else if (pm === "vorkasse") {
       paymentBlock = `<div style="background: #275425; padding: 16px; border-radius: 8px; margin: 24px 0;">
-        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">Zahlungsinformationen – Vorkasse</p>
+        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">Zahlungsinformationen \u2013 Vorkasse</p>
         <p style="color: #FAF8F3; margin: 0; font-size: 14px; line-height: 1.7;">
-          Bitte überweise den Gesamtbetrag von <strong>${total} ${currencyCode}</strong> an:<br><br>
-          <strong>Empfänger:</strong> Girardi M.u.Mitges.<br>
+          Bitte \u00fcberweise den Gesamtbetrag von <strong>${total} ${currencyCode}</strong> an:<br><br>
+          <strong>Empf\u00e4nger:</strong> Girardi M.u.Mitges.<br>
           <strong>IBAN:</strong> AT57 3600 0000 0421 8830<br>
           <strong>BIC:</strong> RZTIAT22<br>
           <strong>Verwendungszweck:</strong> Bestellung #${order.display_id}<br><br>
@@ -76,12 +77,27 @@ async function POST(req, res) {
       </div>`;
     } else {
       paymentBlock = `<div style="background: #275425; padding: 16px; border-radius: 8px; margin: 24px 0;">
-        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">Nächster Schritt</p>
+        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">N\u00e4chster Schritt</p>
         <p style="color: #FAF8F3; margin: 0; font-size: 14px;">
           Wir melden uns bei dir mit den weiteren Details per E-Mail.
         </p>
       </div>`;
     }
+
+    const addressBlock = isPickup ? `
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Abholung vor Ort</h3>
+      <p style="margin: 0; line-height: 1.6;">
+        ${addr?.first_name || ""} ${addr?.last_name || ""}
+      </p>
+    ` : `
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Lieferadresse</h3>
+      <p style="margin: 0; line-height: 1.6;">
+        ${addr?.first_name || ""} ${addr?.last_name || ""}<br>
+        ${addr?.address_1 || ""}<br>
+        ${addr?.postal_code || ""} ${addr?.city || ""}<br>
+        ${addr?.country_code?.toUpperCase() || ""}
+      </p>
+    `;
 
     const html = `
     <div style="max-width: 480px; margin: 0 auto; background: #1a1a14; color: #FAF8F3; font-family: Georgia, serif; padding: 32px; border-radius: 12px;">
@@ -89,7 +105,7 @@ async function POST(req, res) {
         <h1 style="color: #C5A572; margin: 0; font-size: 28px;">The Girardi Oil</h1>
         <p style="color: #7a9a58; margin: 4px 0 0;">1000 Horia</p>
       </div>
-      <h2 style="color: #7a9a58; font-size: 22px;">Vielen Dank für deine Bestellung!</h2>
+      <h2 style="color: #7a9a58; font-size: 22px;">Vielen Dank f\u00fcr deine Bestellung!</h2>
       <p style="margin: 0 0 16px;">Bestellnummer: <strong>#${order.display_id}</strong></p>
       <table style="width: 100%; border-collapse: collapse; margin-bottom: 16px;">${itemRows}</table>
       <table style="width: 100%; font-size: 14px; margin-bottom: 8px;">
@@ -100,13 +116,7 @@ async function POST(req, res) {
       <p style="font-size: 18px; margin: 16px 0; border-top: 2px solid #C5A572; padding-top: 12px;">
         Gesamtbetrag: <strong style="color: #C5A572;">${total} ${currencyCode}</strong>
       </p>
-      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Lieferadresse</h3>
-      <p style="margin: 0; line-height: 1.6;">
-        ${addr?.first_name || ""} ${addr?.last_name || ""}<br>
-        ${addr?.address_1 || ""}<br>
-        ${addr?.postal_code || ""} ${addr?.city || ""}<br>
-        ${addr?.country_code?.toUpperCase() || ""}
-      </p>
+      ${addressBlock}
       ${paymentBlock}
       <p style="text-align: center; color: #666; font-size: 13px; margin-top: 24px;">
         The Girardi Oil / 1000 Horia
@@ -114,13 +124,13 @@ async function POST(req, res) {
     </div>`;
     await (0, mailer_1.sendMail)({
       to: order.email,
-      subject: `Bestellbestätigung #${order.display_id} – The Girardi Oil`,
+      subject: `Bestellbest\u00e4tigung #${order.display_id} \u2013 The Girardi Oil`,
       html,
     });
-    console.log(`✅ Order confirmation email sent to: ${order.email} – Total: ${total} ${currencyCode}`);
+    console.log(`\u2705 Order confirmation email sent to: ${order.email} \u2013 Total: ${total} ${currencyCode}`);
     return res.json({ success: true, email_sent: true });
   } catch (error) {
-    console.error("❌ send-confirmation error:", error);
+    console.error("\u274c send-confirmation error:", error);
     return res.status(500).json({ message: error.message });
   }
 }
