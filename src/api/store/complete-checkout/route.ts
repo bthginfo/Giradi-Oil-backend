@@ -175,45 +175,39 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     if (!order) order = { id: `order_from_${cart_id}`, _fromCart: true }
 
-    // Step 5: Auto-capture payment for PayPal
-    if (payment_method === "paypal" && order?.id && !order._fromCart) {
-      try {
-        const { data: [orderWithPayment] } = await query.graph({
-          entity: "order",
-          filters: { id: order.id },
-          fields: ["payment_collections.payments.id"],
-        })
-        const payments = orderWithPayment?.payment_collections?.flatMap((pc: any) => pc.payments || []) || []
-        for (const payment of payments) {
-          if (payment.id) {
-            const paymentModule = req.scope.resolve("payment") as any
-            try {
-              // Try different Medusa v2 capture APIs
-              if (typeof paymentModule.capturePayment === "function") {
-                await paymentModule.capturePayment(payment.id)
-              } else if (typeof paymentModule.capture === "function") {
-                await paymentModule.capture(payment.id)
-              }
-            } catch (captureErr: any) {
-              console.error("[Checkout] single capture failed:", captureErr.message)
-              // Try alternate signature
-              try {
-                await paymentModule.capturePayment({ payment_id: payment.id })
-              } catch (e2: any) {
-                console.error("[Checkout] alternate capture also failed:", e2.message)
-              }
-            }
-            tick("capturePayment")
-          }
-        }
-      } catch (e: any) {
-        console.error("[Checkout] capture payment failed:", e.message)
-        tick("capturePaymentFailed")
-      }
-    }
-
     tick("DONE total")
     console.log(`[Checkout] Order: ${order.id}`)
+
+    // Step 5: Auto-capture payment for PayPal (fire-and-forget, don't block response)
+    if (payment_method === "paypal" && order?.id && !order._fromCart) {
+      ;(async () => {
+        try {
+          const { data: [orderWithPayment] } = await query.graph({
+            entity: "order",
+            filters: { id: order.id },
+            fields: ["payment_collections.payments.id"],
+          })
+          const payments = orderWithPayment?.payment_collections?.flatMap((pc: any) => pc.payments || []) || []
+          const paymentModule = req.scope.resolve("payment") as any
+          for (const p of payments) {
+            if (p.id) {
+              try {
+                if (typeof paymentModule.capturePayment === "function") {
+                  await paymentModule.capturePayment(p.id)
+                } else if (typeof paymentModule.capture === "function") {
+                  await paymentModule.capture(p.id)
+                }
+              } catch (captureErr: any) {
+                try { await paymentModule.capturePayment({ payment_id: p.id }) } catch (_) {}
+              }
+            }
+          }
+          console.log("[Checkout] PayPal capture completed in background")
+        } catch (e: any) {
+          console.error("[Checkout] background capture failed:", e.message)
+        }
+      })()
+    }
 
     return res.status(200).json({ type: "order", order, _timings: timings })
   } catch (err: any) {
