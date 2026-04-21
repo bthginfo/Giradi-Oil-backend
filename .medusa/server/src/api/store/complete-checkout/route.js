@@ -7,7 +7,8 @@ const utils_1 = require("@medusajs/framework/utils");
 async function POST(req, res) {
   const { cart_id, email, shipping_address, billing_address, shipping_option_id, payment_method } = req.body;
   const t0 = Date.now();
-  const tick = (label) => console.log(`[Checkout] ${label}: ${Date.now() - t0}ms`);
+  const timings = {};
+  const tick = (label) => { timings[label] = Date.now() - t0; console.log(`[Checkout] ${label}: ${timings[label]}ms`); };
 
   if (!cart_id) return res.status(400).json({ message: "cart_id is required" });
 
@@ -117,7 +118,7 @@ async function POST(req, res) {
     }
     tick("DONE total");
     console.log("[Checkout] Order:", order.id);
-    return res.status(200).json({ type: "order", order: order });
+    return res.status(200).json({ type: "order", order: order, _timings: timings });
   } catch (err) {
     console.error("[Checkout] ERROR at " + (Date.now() - t0) + "ms:", err.message, err.stack ? err.stack.slice(0, 500) : "");
     return res.status(500).json({ type: "error", message: err.message || "Checkout failed", code: err.code });
