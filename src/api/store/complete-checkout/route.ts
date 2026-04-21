@@ -187,7 +187,22 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         for (const payment of payments) {
           if (payment.id) {
             const paymentModule = req.scope.resolve("payment") as any
-            await paymentModule.capturePayment({ payment_id: payment.id })
+            try {
+              // Try different Medusa v2 capture APIs
+              if (typeof paymentModule.capturePayment === "function") {
+                await paymentModule.capturePayment(payment.id)
+              } else if (typeof paymentModule.capture === "function") {
+                await paymentModule.capture(payment.id)
+              }
+            } catch (captureErr: any) {
+              console.error("[Checkout] single capture failed:", captureErr.message)
+              // Try alternate signature
+              try {
+                await paymentModule.capturePayment({ payment_id: payment.id })
+              } catch (e2: any) {
+                console.error("[Checkout] alternate capture also failed:", e2.message)
+              }
+            }
             tick("capturePayment")
           }
         }

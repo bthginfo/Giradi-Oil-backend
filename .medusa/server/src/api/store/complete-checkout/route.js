@@ -128,7 +128,20 @@ async function POST(req, res) {
         for (const payment of payments) {
           if (payment.id) {
             var paymentModule = req.scope.resolve("payment");
-            await paymentModule.capturePayment({ payment_id: payment.id });
+            try {
+              if (typeof paymentModule.capturePayment === "function") {
+                await paymentModule.capturePayment(payment.id);
+              } else if (typeof paymentModule.capture === "function") {
+                await paymentModule.capture(payment.id);
+              }
+            } catch (captureErr) {
+              console.error("[Checkout] single capture failed:", captureErr.message);
+              try {
+                await paymentModule.capturePayment({ payment_id: payment.id });
+              } catch (e2) {
+                console.error("[Checkout] alternate capture also failed:", e2.message);
+              }
+            }
             tick("capturePayment");
           }
         }
