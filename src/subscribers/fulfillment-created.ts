@@ -1,82 +1,20 @@
 import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework"
 import { sendMail } from "../lib/mailer"
-import { ContainerRegistrationKeys, remoteQueryObjectFromString } from "@medusajs/framework/utils"
 
 
 export default async function fulfillmentCreatedHandler({
   event,
   container,
 }: SubscriberArgs<Record<string, any>>) {
-  console.log("📦 [Subscriber] fulfillment.created fired – ALL data:", JSON.stringify(event.data))
-  console.log("📦 [Subscriber] fulfillment.created – ALL event keys:", Object.keys(event))
+  console.log("📦 [Subscriber] order.fulfillment_created fired – data:", JSON.stringify(event.data))
 
   try {
     const query = container.resolve("query")
-    const fulfillmentId = event.data.id
-    let orderId: string | null = (event.data as any).order_id || null
-
-    // Strategy 1: order_id directly in event
-    if (orderId) {
-      console.log("[Fulfillment] Got order_id from event:", orderId)
-    }
-
-    // Strategy 2: Query fulfillment entity for order link
-    if (!orderId) {
-      try {
-        const { data: [f] } = await query.graph({
-          entity: "fulfillment",
-          filters: { id: fulfillmentId },
-          fields: ["id", "order.id", "order.display_id"],
-        })
-        if ((f as any)?.order?.id) {
-          orderId = (f as any).order.id
-          console.log("[Fulfillment] Got order_id from fulfillment.order:", orderId)
-        }
-      } catch (e: any) {
-        console.log("[Fulfillment] Strategy 2 failed:", e.message)
-      }
-    }
-
-    // Strategy 3: Remote query order_fulfillment link
-    if (!orderId) {
-      try {
-        const remoteQuery = container.resolve(ContainerRegistrationKeys.REMOTE_QUERY)
-        const links = await remoteQuery(remoteQueryObjectFromString({
-          entryPoint: "order_fulfillment",
-          variables: { filters: { fulfillment_id: fulfillmentId } },
-          fields: ["order_id", "order.*"],
-        }))
-        if (links?.[0]?.order_id) {
-          orderId = links[0].order_id
-          console.log("[Fulfillment] Got order_id from remote query link:", orderId)
-        }
-      } catch (e: any) {
-        console.log("[Fulfillment] Strategy 3 failed:", e.message)
-      }
-    }
-
-    // Strategy 4: Search all recent orders for this fulfillment
-    if (!orderId) {
-      try {
-        const { data: orders } = await query.graph({
-          entity: "order",
-          fields: ["id", "display_id", "fulfillments.id"],
-        })
-        for (const o of (orders || [])) {
-          const fIds = ((o as any).fulfillments || []).map((f: any) => f.id)
-          if (fIds.includes(fulfillmentId)) {
-            orderId = o.id
-            console.log("[Fulfillment] Got order_id from order scan:", orderId)
-            break
-          }
-        }
-      } catch (e: any) {
-        console.log("[Fulfillment] Strategy 4 failed:", e.message)
-      }
-    }
+    const orderId = (event.data as any).order_id
+    const fulfillmentId = (event.data as any).fulfillment_id || event.data.id
 
     if (!orderId) {
-      console.error("❌ [Fulfillment] Could not find order for fulfillment:", fulfillmentId)
+      console.error("❌ [Fulfillment] No order_id in event data")
       return
     }
 
@@ -173,5 +111,5 @@ export default async function fulfillmentCreatedHandler({
 }
 
 export const config: SubscriberConfig = {
-  event: "fulfillment.created",
+  event: "order.fulfillment_created",
 }
