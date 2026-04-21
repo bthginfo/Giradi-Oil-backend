@@ -5,7 +5,7 @@ const mailer_1 = require("../../../lib/mailer");
 
 async function POST(req, res) {
   try {
-    const { order_id, payment_method, is_pickup } = req.body;
+    const { order_id, payment_method, is_pickup, billing_address } = req.body;
     if (!order_id) {
       return res.status(400).json({ message: "order_id is required" });
     }
@@ -84,13 +84,23 @@ async function POST(req, res) {
       </div>`;
     }
 
+    const ba = billing_address || {};
     const addressBlock = isPickup ? `
-      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Abholung vor Ort</h3>
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Rechnungsadresse</h3>
       <p style="margin: 0; line-height: 1.6;">
-        ${addr?.first_name || ""} ${addr?.last_name || ""}
+        ${ba.first_name || addr?.first_name || ""} ${ba.last_name || addr?.last_name || ""}<br>
+        ${ba.address_1 || ""}<br>
+        ${ba.postal_code || ""} ${ba.city || ""}<br>
+        ${(ba.country_code || "").toUpperCase()}
+      </p>
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Abholung in der Werkstatt</h3>
+      <p style="margin: 0; line-height: 1.6;">
+        Girardi Oil Werkstatt<br>
+        1000 Horia<br>
+        AT
       </p>
     ` : `
-      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Lieferadresse</h3>
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Rechnungs- und Lieferadresse</h3>
       <p style="margin: 0; line-height: 1.6;">
         ${addr?.first_name || ""} ${addr?.last_name || ""}<br>
         ${addr?.address_1 || ""}<br>

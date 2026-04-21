@@ -4,7 +4,7 @@ import { sendMail } from "../../lib/mailer"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
-    const { order_id, payment_method, is_pickup } = req.body as { order_id: string; payment_method?: string; is_pickup?: boolean }
+    const { order_id, payment_method, is_pickup, billing_address } = req.body as { order_id: string; payment_method?: string; is_pickup?: boolean; billing_address?: { first_name: string; last_name: string; address_1: string; postal_code: string; city: string; country_code: string } }
 
     if (!order_id) {
       return res.status(400).json({ message: "order_id is required" })
@@ -141,12 +141,21 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       </p>
 
       ${isPickup ? `
-      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Abholung vor Ort</h3>
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Rechnungsadresse</h3>
       <p style="margin: 0; line-height: 1.6;">
-        ${addr?.first_name || ""} ${addr?.last_name || ""}
+        ${billing_address?.first_name || addr?.first_name || ""} ${billing_address?.last_name || addr?.last_name || ""}<br>
+        ${billing_address?.address_1 || ""}<br>
+        ${billing_address?.postal_code || ""} ${billing_address?.city || ""}<br>
+        ${(billing_address?.country_code || "").toUpperCase() || ""}
+      </p>
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Abholung in der Werkstatt</h3>
+      <p style="margin: 0; line-height: 1.6;">
+        Girardi Oil Werkstatt<br>
+        1000 Horia<br>
+        AT
       </p>
       ` : `
-      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Lieferadresse</h3>
+      <h3 style="color: #7a9a58; font-size: 16px; margin: 24px 0 8px;">Rechnungs- und Lieferadresse</h3>
       <p style="margin: 0; line-height: 1.6;">
         ${addr?.first_name || ""} ${addr?.last_name || ""}<br>
         ${addr?.address_1 || ""}<br>
