@@ -104,9 +104,47 @@ async function POST(req, res) {
     });
     var result = workflowResult.result;
 
+    // Try to get the order from the workflow result
     var order = (result && typeof result === "object" && ("id" in result))
       ? result
-      : { id: "order_from_" + cart_id, _fromCart: true };
+      : null;
+
+    // If workflow returned empty, try to find the order via remoteQuery
+    if (!order) {
+      try {
+        var orderCartLinks = await remoteQuery((0, utils_1.remoteQueryObjectFromString)({
+          entryPoint: "order_cart",
+          variables: { filters: { cart_id: cart_id } },
+          fields: ["order.*", "order.items.*", "order.shipping_address.*"],
+        }));
+        var ocl = orderCartLinks[0];
+        if (ocl && ocl.order && ocl.order.id) {
+          order = ocl.order;
+        }
+      } catch (e) {
+        console.warn("[CustomCheckout] Could not find order via order_cart link:", e.message);
+      }
+    }
+
+    // Last resort: query orders by email
+    if (!order && cart.email) {
+      try {
+        var orderResult = await query.graph({
+          entity: "order",
+          filters: { email: cart.email },
+          fields: ["id", "display_id", "total", "email", "created_at"],
+        });
+        if (orderResult.data && orderResult.data.length) {
+          order = orderResult.data[0];
+        }
+      } catch (e) {
+        console.warn("[CustomCheckout] Could not find order by email:", e.message);
+      }
+    }
+
+    if (!order) {
+      order = { id: "order_from_" + cart_id, _fromCart: true };
+    }
 
     console.log("[CustomCheckout] Order created:", order.id);
 

@@ -113,13 +113,48 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       input: { id: cart_id },
     })
 
-    // The workflow result may be empty in Medusa v2 – use it if available,
-    // otherwise return a minimal order object so the frontend can proceed.
-    const order = (result && typeof result === "object" && ("id" in result))
+    // Try to get the order from the workflow result
+    let order: any = (result && typeof result === "object" && ("id" in result))
       ? result
-      : { id: `order_from_${cart_id}`, _fromCart: true }
+      : null
 
-    console.log(`[CustomCheckout] Order created:`, (order as any).id)
+    // If workflow returned empty, try to find the order via remoteQuery
+    if (!order) {
+      try {
+        const [orderCartLink] = await remoteQuery(remoteQueryObjectFromString({
+          entryPoint: "order_cart",
+          variables: { filters: { cart_id } },
+          fields: ["order.*", "order.items.*", "order.shipping_address.*"],
+        }))
+        if (orderCartLink?.order?.id) {
+          order = orderCartLink.order
+        }
+      } catch (e: any) {
+        console.warn("[CustomCheckout] Could not find order via order_cart link:", e.message)
+      }
+    }
+
+    // Last resort: query orders by email sorted by created_at desc
+    if (!order && cart.email) {
+      try {
+        const { data: recentOrders } = await query.graph({
+          entity: "order",
+          filters: { email: cart.email },
+          fields: ["id", "display_id", "total", "email", "created_at"],
+        })
+        if (recentOrders?.length) {
+          order = recentOrders[0]
+        }
+      } catch (e: any) {
+        console.warn("[CustomCheckout] Could not find order by email:", e.message)
+      }
+    }
+
+    if (!order) {
+      order = { id: `order_from_${cart_id}`, _fromCart: true }
+    }
+
+    console.log(`[CustomCheckout] Order created:`, order.id)
 
     return res.status(200).json({
       type: "order",
