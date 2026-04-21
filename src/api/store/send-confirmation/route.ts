@@ -4,7 +4,7 @@ import { sendMail } from "../../lib/mailer"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
-    const { order_id } = req.body as { order_id: string }
+    const { order_id, payment_method } = req.body as { order_id: string; payment_method?: string }
 
     if (!order_id) {
       return res.status(400).json({ message: "order_id is required" })
@@ -35,7 +35,6 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     const currencyCode = (order.currency_code || "EUR").toUpperCase()
 
-    // Helper: Cents → EUR formatiert (z.B. 1490 → "14,90")
     const fmt = (cents: number) =>
       Number(cents).toFixed(2).replace(".", ",")
 
@@ -61,9 +60,51 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const total = fmt(Number(order.total || 0))
     const addr = order.shipping_address
 
-    // Versandart erkennen
     const isPickup = Number(order.shipping_total || 0) === 0
     const shippingLabel = isPickup ? "Abholung (gratis)" : `${shipping} ${currencyCode}`
+
+    // Payment-specific info block
+    let paymentBlock = ""
+    const pm = (payment_method || "").toLowerCase()
+    if (pm === "paypal") {
+      paymentBlock = `
+      <div style="background: #275425; padding: 16px; border-radius: 8px; margin: 24px 0;">
+        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">✅ Zahlung erhalten</p>
+        <p style="color: #FAF8F3; margin: 0; font-size: 14px;">
+          Deine Zahlung über PayPal wurde erfolgreich verarbeitet. Wir bereiten deine Bestellung jetzt für den Versand vor.
+        </p>
+      </div>`
+    } else if (pm === "vorkasse") {
+      paymentBlock = `
+      <div style="background: #275425; padding: 16px; border-radius: 8px; margin: 24px 0;">
+        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">Zahlungsinformationen – Vorkasse</p>
+        <p style="color: #FAF8F3; margin: 0; font-size: 14px; line-height: 1.7;">
+          Bitte überweise den Gesamtbetrag von <strong>${total} ${currencyCode}</strong> an:<br><br>
+          <strong>Empfänger:</strong> The Girardi Oil<br>
+          <strong>IBAN:</strong> AT12 3456 7890 1234 5678<br>
+          <strong>BIC:</strong> GIBAATWWXXX<br>
+          <strong>Verwendungszweck:</strong> Bestellung #${order.display_id}<br><br>
+          Deine Bestellung wird nach Zahlungseingang versendet.
+        </p>
+      </div>`
+    } else if (pm === "bar") {
+      paymentBlock = `
+      <div style="background: #275425; padding: 16px; border-radius: 8px; margin: 24px 0;">
+        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">Barzahlung bei Abholung</p>
+        <p style="color: #FAF8F3; margin: 0; font-size: 14px; line-height: 1.7;">
+          Bitte bringe den Betrag von <strong>${total} ${currencyCode}</strong> in bar zur Abholung mit.<br><br>
+          Wir melden uns bei dir, sobald deine Bestellung abholbereit ist.
+        </p>
+      </div>`
+    } else {
+      paymentBlock = `
+      <div style="background: #275425; padding: 16px; border-radius: 8px; margin: 24px 0;">
+        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">Nächster Schritt</p>
+        <p style="color: #FAF8F3; margin: 0; font-size: 14px;">
+          Wir melden uns bei dir mit den weiteren Details per E-Mail.
+        </p>
+      </div>`
+    }
 
     const html = `
     <div style="max-width: 480px; margin: 0 auto; background: #1a1a14; color: #FAF8F3; font-family: Georgia, serif; padding: 32px; border-radius: 12px;">
@@ -106,12 +147,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         ${addr?.country_code?.toUpperCase() || ""}
       </p>
 
-      <div style="background: #275425; padding: 16px; border-radius: 8px; margin: 24px 0;">
-        <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">Nächster Schritt</p>
-        <p style="color: #FAF8F3; margin: 0; font-size: 14px;">
-          Wir melden uns bei dir mit den Zahlungsinformationen per E-Mail.
-        </p>
-      </div>
+      ${paymentBlock}
 
       <p style="text-align: center; color: #666; font-size: 13px; margin-top: 24px;">
         The Girardi Oil / 1000 Horia

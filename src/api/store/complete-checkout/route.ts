@@ -1,17 +1,17 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { completeCartWorkflow, createPaymentCollectionForCartWorkflow, createPaymentSessionsWorkflow } from "@medusajs/medusa/core-flows"
+import { completeCartWorkflow, createPaymentCollectionForCartWorkflow, createPaymentSessionsWorkflow, updateCartWorkflow, addShippingMethodToCartWorkflow } from "@medusajs/medusa/core-flows"
 import { ContainerRegistrationKeys, remoteQueryObjectFromString } from "@medusajs/framework/utils"
 
 /**
  * All-in-one checkout endpoint.
- * Creates payment collection + session, authorizes payment, and completes cart
+ * Handles: update cart → add shipping → payment collection → session → authorize → complete
  * in a single request to minimise frontend round-trips.
  *
  * POST /store/complete-checkout
- * Body: { cart_id: string }
+ * Body: { cart_id, email?, shipping_address?, billing_address?, shipping_option_id?, payment_method? }
  */
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
-  const { cart_id } = req.body as { cart_id: string }
+  const { cart_id, email, shipping_address, billing_address, shipping_option_id, payment_method } = req.body as any
 
   if (!cart_id) {
     return res.status(400).json({ message: "cart_id is required" })
@@ -19,21 +19,32 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
   try {
     const query = req.scope.resolve("query")
+    const remoteQuery = req.scope.resolve(ContainerRegistrationKeys.REMOTE_QUERY)
+
+    // ---- Step 0: Update cart with customer data if provided ----
+    if (email || shipping_address || billing_address) {
+      const updateData: any = { id: cart_id }
+      if (email) updateData.email = email
+      if (shipping_address) updateData.shipping_address = shipping_address
+      if (billing_address) updateData.billing_address = billing_address
+      await updateCartWorkflow(req.scope).run({ input: updateData })
+    }
+
+    // ---- Step 0b: Add shipping method if provided ----
+    if (shipping_option_id) {
+      await addShippingMethodToCartWorkflow(req.scope).run({
+        input: { cart_id, options: [{ id: shipping_option_id }] },
+      })
+    }
+
+    // Fetch cart with all needed relations
     const { data: [cart] } = await query.graph({
       entity: "cart",
       filters: { id: cart_id },
       fields: [
-        "id",
-        "email",
-        "currency_code",
-        "total",
-        "subtotal",
-        "shipping_total",
-        "items.*",
-        "shipping_address.*",
-        "billing_address.*",
-        "shipping_methods.*",
-        "payment_collection.*",
+        "id", "email", "currency_code", "total", "subtotal", "shipping_total",
+        "items.*", "shipping_address.*", "billing_address.*",
+        "shipping_methods.*", "payment_collection.*",
         "payment_collection.payment_sessions.*",
       ],
     })
