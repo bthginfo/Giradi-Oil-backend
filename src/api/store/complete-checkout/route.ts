@@ -20,8 +20,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const { data: [cartCheck] } = await query.graph({
       entity: "cart",
       filters: { id: cart_id },
-      fields: ["id", "email", "shipping_address.*", "shipping_methods.*",
-        "payment_collection.*", "payment_collection.payment_sessions.*"],
+      fields: ["id", "email", "currency_code", "total", "subtotal", "shipping_total",
+        "items.*", "shipping_address.*", "billing_address.*",
+        "shipping_methods.*", "payment_collection.*",
+        "payment_collection.payment_sessions.*"],
     })
     tick("prefetchCheck")
 
@@ -71,19 +73,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       cart = freshCart
       tick("fetchCart")
     } else {
-      // Use the prefetch data but we need full fields - do a quick fetch
-      const { data: [fullCart] } = await query.graph({
-        entity: "cart",
-        filters: { id: cart_id },
-        fields: [
-          "id", "email", "currency_code", "total", "subtotal", "shipping_total",
-          "items.*", "shipping_address.*", "billing_address.*",
-          "shipping_methods.*", "payment_collection.*",
-          "payment_collection.payment_sessions.*",
-        ],
-      })
-      cart = fullCart
-      tick("fetchCartFull")
+      cart = cartCheck
+      tick("reuseCart")
     }
 
     if (!cart) return res.status(404).json({ message: "Cart not found" })
@@ -130,8 +121,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       tick("paySessionExists")
     }
 
-    // Step 3: Authorize
-    if (paymentSession.status === "pending") {
+    // Step 3: Authorize (skip for PayPal - already authorized via popup)
+    if (payment_method === "paypal") {
+      tick("authorizeSkippedPaypal")
+    } else if (paymentSession.status === "pending") {
       const paymentModuleService = req.scope.resolve("payment") as any
       await paymentModuleService.authorizePaymentSession(paymentSession.id, {})
       tick("authorize")
