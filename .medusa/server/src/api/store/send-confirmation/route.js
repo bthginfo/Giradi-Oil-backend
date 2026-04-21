@@ -136,9 +136,10 @@ async function POST(req, res) {
       to: order.email,
       subject: `Bestellbest\u00e4tigung #${order.display_id} \u2013 The Girardi Oil`,
       html,
-    });
+    }).catch((e) => console.error("[Customer Mail] Failed:", e.message));
 
-    // Admin notification email
+    // Admin notification email (independent of customer email)
+    try {
     const ADMIN_EMAIL = "julius.voningelheim@tuvsud.com";
     const pmLabel = pm === "paypal" ? "PayPal" : pm === "vorkasse" ? "Vorkasse (\u00dcberweisung)" : pm === "bar" ? "Barzahlung bei Abholung" : pm || "Unbekannt";
     const adminItemRows = (order.items || []).map((item) =>
@@ -177,7 +178,11 @@ async function POST(req, res) {
       to: ADMIN_EMAIL,
       subject: "\ud83d\uded2 Neue Bestellung #" + order.display_id + " \u2013 " + pmLabel + " \u2013 " + total + " " + currencyCode,
       html: adminHtml,
-    }).catch((e) => console.warn("[Admin Mail] Failed:", e.message));
+    }).then(() => console.log(`\u2705 Admin email sent to: ${ADMIN_EMAIL}`))
+      .catch((e) => console.error(`\u274c [Admin Mail] Failed to send to ${ADMIN_EMAIL}:`, e.message));
+    } catch (adminErr) {
+      console.error("\u274c [Admin Mail] Template error:", adminErr.message);
+    }
 
     console.log(`\u2705 Order confirmation email sent to: ${order.email} \u2013 Total: ${total} ${currencyCode}`);
     return res.json({ success: true, email_sent: true });

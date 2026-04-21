@@ -175,9 +175,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       to: order.email,
       subject: `Bestellbestätigung #${order.display_id} – The Girardi Oil`,
       html,
-    })
+    }).catch((e: any) => console.error("[Customer Mail] Failed:", e.message))
 
-    // Admin notification email
+    // Admin notification email (independent of customer email)
+    try {
     const ADMIN_EMAIL = "julius.voningelheim@tuvsud.com"
     const pmLabel = pm === "paypal" ? "PayPal" : pm === "vorkasse" ? "Vorkasse (Überweisung)" : pm === "bar" ? "Barzahlung bei Abholung" : pm || "Unbekannt"
     const adminItemRows = (order.items || []).map((item: any) =>
@@ -218,7 +219,11 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       to: ADMIN_EMAIL,
       subject: `🛒 Neue Bestellung #${order.display_id} – ${pmLabel} – ${total} ${currencyCode}`,
       html: adminHtml,
-    }).catch((e: any) => console.warn("[Admin Mail] Failed:", e.message))
+    }).then(() => console.log(`✅ Admin email sent to: ${ADMIN_EMAIL}`))
+      .catch((e: any) => console.error(`❌ [Admin Mail] Failed to send to ${ADMIN_EMAIL}:`, e.message))
+    } catch (adminErr: any) {
+      console.error("❌ [Admin Mail] Template error:", adminErr.message)
+    }
 
     console.log(`✅ Order confirmation email sent to: ${order.email} – Total: ${total} ${currencyCode}`)
     return res.json({ success: true, email_sent: true })
