@@ -1,5 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { completeCartWorkflow, createPaymentCollectionForCartWorkflow, createPaymentSessionsWorkflow, updateCartWorkflow, addShippingMethodToCartWorkflow } from "@medusajs/medusa/core-flows"
+import { completeCartWorkflow, capturePaymentWorkflow, createPaymentCollectionForCartWorkflow, createPaymentSessionsWorkflow, updateCartWorkflow, addShippingMethodToCartWorkflow } from "@medusajs/medusa/core-flows"
 import { ContainerRegistrationKeys, remoteQueryObjectFromString } from "@medusajs/framework/utils"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
@@ -135,6 +135,27 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     if (!order) order = { id: `order_from_${cart_id}`, _fromCart: true }
+
+    // Step 5: Auto-capture payment for PayPal
+    if (payment_method === "paypal" && order?.id && !order._fromCart) {
+      try {
+        const { data: [orderWithPayment] } = await query.graph({
+          entity: "order",
+          filters: { id: order.id },
+          fields: ["payment_collections.payments.id"],
+        })
+        const payments = orderWithPayment?.payment_collections?.flatMap((pc: any) => pc.payments || []) || []
+        for (const payment of payments) {
+          if (payment.id) {
+            await capturePaymentWorkflow(req.scope).run({ input: { payment_id: payment.id } })
+            tick("capturePayment")
+          }
+        }
+      } catch (e: any) {
+        console.error("[Checkout] capture payment failed:", e.message)
+        tick("capturePaymentFailed")
+      }
+    }
 
     tick("DONE total")
     console.log(`[Checkout] Order: ${order.id}`)

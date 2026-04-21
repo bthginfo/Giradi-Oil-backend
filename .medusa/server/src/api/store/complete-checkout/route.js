@@ -94,6 +94,26 @@ async function POST(req, res) {
     }
 
     if (!order) order = { id: "order_from_" + cart_id, _fromCart: true };
+    // Step 5: Auto-capture payment for PayPal
+    if (payment_method === "paypal" && order && order.id && !order._fromCart) {
+      try {
+        const { data: [orderWithPayment] } = await query.graph({
+          entity: "order",
+          filters: { id: order.id },
+          fields: ["payment_collections.payments.id"],
+        });
+        const payments = (orderWithPayment?.payment_collections || []).flatMap((pc) => pc.payments || []);
+        for (const payment of payments) {
+          if (payment.id) {
+            await (0, core_flows_1.capturePaymentWorkflow)(req.scope).run({ input: { payment_id: payment.id } });
+            tick("capturePayment");
+          }
+        }
+      } catch (e) {
+        console.error("[Checkout] capture payment failed:", e.message);
+        tick("capturePaymentFailed");
+      }
+    }
     tick("DONE total");
     console.log("[Checkout] Order:", order.id);
     return res.status(200).json({ type: "order", order: order });
