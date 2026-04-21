@@ -105,7 +105,8 @@ async function POST(req, res) {
         const payments = (orderWithPayment?.payment_collections || []).flatMap((pc) => pc.payments || []);
         for (const payment of payments) {
           if (payment.id) {
-            await (0, core_flows_1.capturePaymentWorkflow)(req.scope).run({ input: { payment_id: payment.id } });
+            var paymentModule = req.scope.resolve("payment");
+            await paymentModule.capturePayment({ payment_id: payment.id });
             tick("capturePayment");
           }
         }

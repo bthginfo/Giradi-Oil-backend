@@ -1,5 +1,5 @@
 import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
-import { completeCartWorkflow, capturePaymentWorkflow, createPaymentCollectionForCartWorkflow, createPaymentSessionsWorkflow, updateCartWorkflow, addShippingMethodToCartWorkflow } from "@medusajs/medusa/core-flows"
+import { completeCartWorkflow, createPaymentCollectionForCartWorkflow, createPaymentSessionsWorkflow, updateCartWorkflow, addShippingMethodToCartWorkflow } from "@medusajs/medusa/core-flows"
 import { ContainerRegistrationKeys, remoteQueryObjectFromString } from "@medusajs/framework/utils"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
@@ -147,7 +147,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         const payments = orderWithPayment?.payment_collections?.flatMap((pc: any) => pc.payments || []) || []
         for (const payment of payments) {
           if (payment.id) {
-            await capturePaymentWorkflow(req.scope).run({ input: { payment_id: payment.id } })
+            const paymentModule = req.scope.resolve("payment") as any
+            await paymentModule.capturePayment({ payment_id: payment.id })
             tick("capturePayment")
           }
         }
