@@ -4,7 +4,7 @@ import { sendMail } from "../../lib/mailer"
 
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   try {
-    const { order_id, payment_method } = req.body as { order_id: string; payment_method?: string }
+    const { order_id, payment_method, is_pickup } = req.body as { order_id: string; payment_method?: string; is_pickup?: boolean }
 
     if (!order_id) {
       return res.status(400).json({ message: "order_id is required" })
@@ -60,7 +60,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const total = fmt(Number(order.total || 0))
     const addr = order.shipping_address
 
-    const isPickup = (payment_method || "").toLowerCase() === "bar"
+    const isPickup = is_pickup === true || (payment_method || "").toLowerCase() === "bar"
     const isFreeShipping = !isPickup && Number(order.shipping_total || 0) === 0
     const shippingLabel = isPickup ? "Abholung (gratis)" : isFreeShipping ? "Kostenloser Versand" : `${shipping} ${currencyCode}`
 

@@ -5,7 +5,7 @@ const mailer_1 = require("../../../lib/mailer");
 
 async function POST(req, res) {
   try {
-    const { order_id, payment_method } = req.body;
+    const { order_id, payment_method, is_pickup } = req.body;
     if (!order_id) {
       return res.status(400).json({ message: "order_id is required" });
     }
@@ -42,7 +42,7 @@ async function POST(req, res) {
     const total = fmt(Number(order.total || 0));
     const addr = order.shipping_address;
 
-    const isPickup = (payment_method || "").toLowerCase() === "bar";
+    const isPickup = is_pickup === true || (payment_method || "").toLowerCase() === "bar";
     const isFreeShipping = !isPickup && Number(order.shipping_total || 0) === 0;
     const shippingLabel = isPickup ? "Abholung (gratis)" : isFreeShipping ? "Kostenloser Versand" : `${shipping} ${currencyCode}`;
 
