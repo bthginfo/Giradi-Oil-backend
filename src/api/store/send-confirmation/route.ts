@@ -80,9 +80,9 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         <p style="color: #C5A572; margin: 0 0 4px; font-weight: bold;">Zahlungsinformationen – Vorkasse</p>
         <p style="color: #FAF8F3; margin: 0; font-size: 14px; line-height: 1.7;">
           Bitte überweise den Gesamtbetrag von <strong>${total} ${currencyCode}</strong> an:<br><br>
-          <strong>Empfänger:</strong> The Girardi Oil<br>
-          <strong>IBAN:</strong> AT12 3456 7890 1234 5678<br>
-          <strong>BIC:</strong> GIBAATWWXXX<br>
+          <strong>Empfänger:</strong> Girardi M.u.Mitges.<br>
+          <strong>IBAN:</strong> AT57 3600 0000 0421 8830<br>
+          <strong>BIC:</strong> RZTIAT22<br>
           <strong>Verwendungszweck:</strong> Bestellung #${order.display_id}<br><br>
           Deine Bestellung wird nach Zahlungseingang versendet.
         </p>
