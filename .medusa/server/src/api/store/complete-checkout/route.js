@@ -16,22 +16,43 @@ async function POST(req, res) {
     const query = req.scope.resolve("query");
     const remoteQuery = req.scope.resolve(utils_1.ContainerRegistrationKeys.REMOTE_QUERY);
 
-    if (email || shipping_address || billing_address) {
+    // Prefetch cart to check what's already set
+    const { data: [cartCheck] } = await query.graph({
+      entity: "cart",
+      filters: { id: cart_id },
+      fields: ["id","email","shipping_address.*","shipping_methods.*","payment_collection.*","payment_collection.payment_sessions.*"],
+    });
+    tick("prefetchCheck");
+
+    if (!cartCheck) return res.status(404).json({ message: "Cart not found" });
+
+    // Step 0: Update cart only if needed
+    const needsUpdate = (email && !cartCheck.email) ||
+      (shipping_address && !(cartCheck.shipping_address && cartCheck.shipping_address.address_1)) ||
+      (billing_address);
+    if (needsUpdate) {
       const updateData = { id: cart_id };
       if (email) updateData.email = email;
       if (shipping_address) updateData.shipping_address = shipping_address;
       if (billing_address) updateData.billing_address = billing_address;
       await (0, core_flows_1.updateCartWorkflow)(req.scope).run({ input: updateData });
       tick("updateCart");
+    } else {
+      tick("updateCartSkipped");
     }
 
-    if (shipping_option_id) {
+    // Step 0b: Add shipping only if not already set
+    const hasShipping = cartCheck.shipping_methods && cartCheck.shipping_methods.length > 0;
+    if (shipping_option_id && !hasShipping) {
       await (0, core_flows_1.addShippingMethodToCartWorkflow)(req.scope).run({
         input: { cart_id: cart_id, options: [{ id: shipping_option_id }] },
       });
       tick("addShipping");
+    } else {
+      tick("addShippingSkipped");
     }
 
+    // Fetch full cart
     const { data: [cart] } = await query.graph({
       entity: "cart",
       filters: { id: cart_id },

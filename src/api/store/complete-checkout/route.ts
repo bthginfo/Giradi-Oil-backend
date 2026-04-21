@@ -16,36 +16,74 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const query = req.scope.resolve("query")
     const remoteQuery = req.scope.resolve(ContainerRegistrationKeys.REMOTE_QUERY)
 
-    // Step 0: Update cart if data provided
-    if (email || shipping_address || billing_address) {
+    // Fetch cart first to check what's already set
+    const { data: [cartCheck] } = await query.graph({
+      entity: "cart",
+      filters: { id: cart_id },
+      fields: ["id", "email", "shipping_address.*", "shipping_methods.*",
+        "payment_collection.*", "payment_collection.payment_sessions.*"],
+    })
+    tick("prefetchCheck")
+
+    if (!cartCheck) return res.status(404).json({ message: "Cart not found" })
+
+    // Step 0: Update cart only if needed
+    const needsUpdate = (email && !cartCheck.email) || 
+      (shipping_address && !cartCheck.shipping_address?.address_1) ||
+      (billing_address)
+    if (needsUpdate) {
       const updateData: any = { id: cart_id }
       if (email) updateData.email = email
       if (shipping_address) updateData.shipping_address = shipping_address
       if (billing_address) updateData.billing_address = billing_address
       await updateCartWorkflow(req.scope).run({ input: updateData })
       tick("updateCart")
+    } else {
+      tick("updateCartSkipped")
     }
 
-    // Step 0b: Add shipping if provided
-    if (shipping_option_id) {
+    // Step 0b: Add shipping only if not already set
+    const hasShipping = cartCheck.shipping_methods?.length > 0
+    if (shipping_option_id && !hasShipping) {
       await addShippingMethodToCartWorkflow(req.scope).run({
         input: { cart_id, options: [{ id: shipping_option_id }] },
       })
       tick("addShipping")
+    } else {
+      tick("addShippingSkipped")
     }
 
-    // Fetch cart
-    const { data: [cart] } = await query.graph({
-      entity: "cart",
-      filters: { id: cart_id },
-      fields: [
-        "id", "email", "currency_code", "total", "subtotal", "shipping_total",
-        "items.*", "shipping_address.*", "billing_address.*",
-        "shipping_methods.*", "payment_collection.*",
-        "payment_collection.payment_sessions.*",
-      ],
-    })
-    tick("fetchCart")
+    // Fetch full cart (re-fetch if we made changes, use cached if not)
+    const needsRefetch = needsUpdate || (shipping_option_id && !hasShipping)
+    let cart: any
+    if (needsRefetch) {
+      const { data: [freshCart] } = await query.graph({
+        entity: "cart",
+        filters: { id: cart_id },
+        fields: [
+          "id", "email", "currency_code", "total", "subtotal", "shipping_total",
+          "items.*", "shipping_address.*", "billing_address.*",
+          "shipping_methods.*", "payment_collection.*",
+          "payment_collection.payment_sessions.*",
+        ],
+      })
+      cart = freshCart
+      tick("fetchCart")
+    } else {
+      // Use the prefetch data but we need full fields - do a quick fetch
+      const { data: [fullCart] } = await query.graph({
+        entity: "cart",
+        filters: { id: cart_id },
+        fields: [
+          "id", "email", "currency_code", "total", "subtotal", "shipping_total",
+          "items.*", "shipping_address.*", "billing_address.*",
+          "shipping_methods.*", "payment_collection.*",
+          "payment_collection.payment_sessions.*",
+        ],
+      })
+      cart = fullCart
+      tick("fetchCartFull")
+    }
 
     if (!cart) return res.status(404).json({ message: "Cart not found" })
 
