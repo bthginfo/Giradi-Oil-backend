@@ -112,9 +112,7 @@ async function POST(req, res) {
         } else {
             tick("paySessionExists");
         }
-        if (payment_method === "paypal") {
-            tick("authorizeSkippedPaypal");
-        } else if (paymentSession.status === "pending") {
+        if (paymentSession.status === "pending") {
             const paymentModuleService = req.scope.resolve("payment");
             await paymentModuleService.authorizePaymentSession(paymentSession.id, {});
             tick("authorize");

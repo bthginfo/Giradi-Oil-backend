@@ -121,10 +121,8 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       tick("paySessionExists")
     }
 
-    // Step 3: Authorize (skip for PayPal - already authorized via popup)
-    if (payment_method === "paypal") {
-      tick("authorizeSkippedPaypal")
-    } else if (paymentSession.status === "pending") {
+    // Step 3: Authorize payment session
+    if (paymentSession.status === "pending") {
       const paymentModuleService = req.scope.resolve("payment") as any
       await paymentModuleService.authorizePaymentSession(paymentSession.id, {})
       tick("authorize")
