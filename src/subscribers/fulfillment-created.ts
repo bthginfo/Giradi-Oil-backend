@@ -1,73 +1,121 @@
 import type { SubscriberArgs, SubscriberConfig } from "@medusajs/framework"
 import { sendMail } from "../lib/mailer"
+import { ContainerRegistrationKeys, remoteQueryObjectFromString } from "@medusajs/framework/utils"
 
 
 export default async function fulfillmentCreatedHandler({
   event,
   container,
-}: SubscriberArgs<{ id: string; order_id?: string }>) {
-  console.log("📦 [Subscriber] fulfillment.created fired – data:", JSON.stringify(event.data))
+}: SubscriberArgs<Record<string, any>>) {
+  console.log("📦 [Subscriber] fulfillment.created fired – ALL data:", JSON.stringify(event.data))
+  console.log("📦 [Subscriber] fulfillment.created – ALL event keys:", Object.keys(event))
 
   try {
     const query = container.resolve("query")
+    const fulfillmentId = event.data.id
+    let orderId: string | null = (event.data as any).order_id || null
 
-    // Try to get order_id from event data or via fulfillment link
-    let orderId = (event.data as any).order_id
-    let fulfillmentData: any = null
+    // Strategy 1: order_id directly in event
+    if (orderId) {
+      console.log("[Fulfillment] Got order_id from event:", orderId)
+    }
 
+    // Strategy 2: Query fulfillment entity for order link
     if (!orderId) {
-      // Try querying fulfillment directly for order relation
       try {
         const { data: [f] } = await query.graph({
           entity: "fulfillment",
-          filters: { id: event.data.id },
-          fields: ["id", "labels.*"],
+          filters: { id: fulfillmentId },
+          fields: ["id", "order.id", "order.display_id"],
         })
-        fulfillmentData = f
+        if ((f as any)?.order?.id) {
+          orderId = (f as any).order.id
+          console.log("[Fulfillment] Got order_id from fulfillment.order:", orderId)
+        }
       } catch (e: any) {
-        console.warn("[Subscriber] Could not query fulfillment:", e.message)
+        console.log("[Fulfillment] Strategy 2 failed:", e.message)
       }
+    }
 
-      // Try order_fulfillment link
+    // Strategy 3: Remote query order_fulfillment link
+    if (!orderId) {
       try {
-        const { data: links } = await query.graph({
-          entity: "order_fulfillment",
-          filters: { fulfillment_id: event.data.id },
-          fields: ["order_id"],
-        })
-        if (links?.[0]?.order_id) orderId = links[0].order_id
+        const remoteQuery = container.resolve(ContainerRegistrationKeys.REMOTE_QUERY)
+        const links = await remoteQuery(remoteQueryObjectFromString({
+          entryPoint: "order_fulfillment",
+          variables: { filters: { fulfillment_id: fulfillmentId } },
+          fields: ["order_id", "order.*"],
+        }))
+        if (links?.[0]?.order_id) {
+          orderId = links[0].order_id
+          console.log("[Fulfillment] Got order_id from remote query link:", orderId)
+        }
       } catch (e: any) {
-        console.warn("[Subscriber] order_fulfillment link query failed:", e.message)
+        console.log("[Fulfillment] Strategy 3 failed:", e.message)
+      }
+    }
+
+    // Strategy 4: Search all recent orders for this fulfillment
+    if (!orderId) {
+      try {
+        const { data: orders } = await query.graph({
+          entity: "order",
+          fields: ["id", "display_id", "fulfillments.id"],
+        })
+        for (const o of (orders || [])) {
+          const fIds = ((o as any).fulfillments || []).map((f: any) => f.id)
+          if (fIds.includes(fulfillmentId)) {
+            orderId = o.id
+            console.log("[Fulfillment] Got order_id from order scan:", orderId)
+            break
+          }
+        }
+      } catch (e: any) {
+        console.log("[Fulfillment] Strategy 4 failed:", e.message)
       }
     }
 
     if (!orderId) {
-      console.warn("⚠️ [Subscriber] Could not find order for fulfillment:", event.data.id)
+      console.error("❌ [Fulfillment] Could not find order for fulfillment:", fulfillmentId)
       return
     }
 
-    // Fetch order details
+    // Get fulfillment labels for tracking
+    let trackingNumber: string | null = null
+    let trackingUrl: string | null = null
+    try {
+      const { data: [f] } = await query.graph({
+        entity: "fulfillment",
+        filters: { id: fulfillmentId },
+        fields: ["id", "labels.*", "tracking_links.*"],
+      })
+      const label = (f as any)?.labels?.[0]
+      trackingNumber = label?.tracking_number || null
+      trackingUrl = label?.tracking_url || null
+      if (!trackingNumber) {
+        const tl = (f as any)?.tracking_links?.[0]
+        trackingNumber = tl?.tracking_number || null
+        trackingUrl = tl?.url || null
+      }
+    } catch (e: any) {
+      console.log("[Fulfillment] Could not get tracking info:", e.message)
+    }
+
+    // Get order details
     const { data: [order] } = await query.graph({
       entity: "order",
       filters: { id: orderId },
-      fields: [
-        "id", "display_id", "email", "currency_code",
-        "items.*", "shipping_address.*",
-      ],
+      fields: ["id", "display_id", "email", "currency_code", "items.*", "shipping_address.*"],
     })
 
     if (!order) {
-      console.warn("⚠️ [Subscriber] Order not found:", orderId)
+      console.error("❌ [Fulfillment] Order not found:", orderId)
       return
     }
+
     const cc = (order.currency_code || "EUR").toUpperCase()
     const fmt = (cents: number) => Number(cents).toFixed(2).replace(".", ",")
-    const addr = order.shipping_address
-
-    // Tracking-Info aus Labels (from fulfillment query or event data)
-    const label = fulfillmentData?.labels?.[0] as any
-    const trackingNumber = label?.tracking_number || (event.data as any).tracking_number || null
-    const trackingUrl = label?.tracking_url || (event.data as any).tracking_url || null
+    const addr = order.shipping_address as any
 
     const trackingHtml = trackingNumber
       ? `<div style="background:#275425;padding:16px;border-radius:8px;margin:24px 0;">
@@ -118,9 +166,9 @@ export default async function fulfillmentCreatedHandler({
       html,
     })
 
-    console.log(`✅ [Subscriber] Fulfillment email sent to: ${order.email}`)
+    console.log(`✅ [Fulfillment] Email sent to: ${order.email}`)
   } catch (err: any) {
-    console.error("❌ [Subscriber] fulfillment.created error:", err.message)
+    console.error("❌ [Fulfillment] Error:", err.message, err.stack?.slice(0, 300))
   }
 }
 
