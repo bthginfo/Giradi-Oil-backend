@@ -179,7 +179,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     // Admin notification email (independent of customer email)
     try {
-    const ADMIN_EMAIL = "ingelheim.webflow@gmail.com"
+    const ADMIN_EMAIL = "info@thegirardioil.at"
     const pmLabel = pm === "paypal" ? "PayPal" : pm === "vorkasse" ? "Vorkasse (Überweisung)" : pm === "bar" ? "Barzahlung bei Abholung" : pm || "Unbekannt"
     const adminItemRows = (order.items || []).map((item: any) =>
       `<tr><td style="padding:4px 8px;border:1px solid #ddd;">${item.title}</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:center;">${item.quantity}</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:right;">${fmt(Number(item.unit_price || 0) * Number(item.quantity || 1))} ${currencyCode}</td></tr>`
