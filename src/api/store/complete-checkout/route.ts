@@ -2,16 +2,10 @@ import type { MedusaRequest, MedusaResponse } from "@medusajs/framework/http"
 import { completeCartWorkflow, createPaymentCollectionForCartWorkflow, createPaymentSessionsWorkflow, updateCartWorkflow, addShippingMethodToCartWorkflow } from "@medusajs/medusa/core-flows"
 import { ContainerRegistrationKeys, remoteQueryObjectFromString } from "@medusajs/framework/utils"
 
-/**
- * All-in-one checkout endpoint.
- * Handles: update cart → add shipping → payment collection → session → authorize → complete
- * in a single request to minimise frontend round-trips.
- *
- * POST /store/complete-checkout
- * Body: { cart_id, email?, shipping_address?, billing_address?, shipping_option_id?, payment_method? }
- */
 export async function POST(req: MedusaRequest, res: MedusaResponse) {
   const { cart_id, email, shipping_address, billing_address, shipping_option_id, payment_method } = req.body as any
+  const t0 = Date.now()
+  const tick = (label: string) => console.log(`[Checkout] ${label}: ${Date.now() - t0}ms`)
 
   if (!cart_id) {
     return res.status(400).json({ message: "cart_id is required" })
@@ -21,23 +15,25 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     const query = req.scope.resolve("query")
     const remoteQuery = req.scope.resolve(ContainerRegistrationKeys.REMOTE_QUERY)
 
-    // ---- Step 0: Update cart with customer data if provided ----
+    // Step 0: Update cart if data provided
     if (email || shipping_address || billing_address) {
       const updateData: any = { id: cart_id }
       if (email) updateData.email = email
       if (shipping_address) updateData.shipping_address = shipping_address
       if (billing_address) updateData.billing_address = billing_address
       await updateCartWorkflow(req.scope).run({ input: updateData })
+      tick("updateCart")
     }
 
-    // ---- Step 0b: Add shipping method if provided ----
+    // Step 0b: Add shipping if provided
     if (shipping_option_id) {
       await addShippingMethodToCartWorkflow(req.scope).run({
         input: { cart_id, options: [{ id: shipping_option_id }] },
       })
+      tick("addShipping")
     }
 
-    // Fetch cart with all needed relations
+    // Fetch cart
     const { data: [cart] } = await query.graph({
       entity: "cart",
       filters: { id: cart_id },
@@ -48,104 +44,82 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
         "payment_collection.payment_sessions.*",
       ],
     })
+    tick("fetchCart")
 
-    if (!cart) {
-      return res.status(404).json({ message: "Cart not found" })
-    }
+    if (!cart) return res.status(404).json({ message: "Cart not found" })
 
-    // Validate basic prerequisites
     const errors: string[] = []
     if (!cart.email) errors.push("Email is missing")
     if (!cart.items?.length) errors.push("Cart has no items")
     if (!cart.shipping_methods?.length) errors.push("No shipping method selected")
+    if (errors.length > 0) return res.status(400).json({ message: "Cart is not ready for completion", errors })
 
-    if (errors.length > 0) {
-      return res.status(400).json({ message: "Cart is not ready for completion", errors })
-    }
-
-    // ---- Step 1: Ensure payment collection exists ----
-    const remoteQuery = req.scope.resolve(ContainerRegistrationKeys.REMOTE_QUERY)
+    // Step 1: Payment collection
     let paymentCollectionId = cart.payment_collection?.id
     if (!paymentCollectionId) {
-      console.log("[CustomCheckout] Creating payment collection for cart", cart_id)
-      await createPaymentCollectionForCartWorkflow(req.scope).run({
-        input: { cart_id },
-      })
+      await createPaymentCollectionForCartWorkflow(req.scope).run({ input: { cart_id } })
+      tick("createPayCol")
       const [rel] = await remoteQuery(remoteQueryObjectFromString({
         entryPoint: "cart_payment_collection",
         variables: { filters: { cart_id } },
         fields: ["payment_collection.id", "payment_collection.payment_sessions.*"],
       }))
       paymentCollectionId = rel?.payment_collection?.id
-      if (!paymentCollectionId) {
-        return res.status(400).json({ message: "Payment collection creation returned no ID" })
-      }
+      if (!paymentCollectionId) return res.status(400).json({ message: "Payment collection creation returned no ID" })
+      tick("fetchPayCol")
+    } else {
+      tick("payColExists")
     }
 
-    // ---- Step 2: Ensure payment session exists ----
+    // Step 2: Payment session
     let paymentSession = cart.payment_collection?.payment_sessions?.[0]
     if (!paymentSession) {
-      console.log("[CustomCheckout] Creating payment session for collection", paymentCollectionId)
       await createPaymentSessionsWorkflow(req.scope).run({
-        input: {
-          payment_collection_id: paymentCollectionId,
-          provider_id: "pp_system_default",
-        },
+        input: { payment_collection_id: paymentCollectionId, provider_id: "pp_system_default" },
       })
-      // Re-fetch to get the created session
+      tick("createPaySession")
       const [rel] = await remoteQuery(remoteQueryObjectFromString({
         entryPoint: "cart_payment_collection",
         variables: { filters: { cart_id } },
         fields: ["payment_collection.payment_sessions.*"],
       }))
       paymentSession = rel?.payment_collection?.payment_sessions?.[0]
-      if (!paymentSession) {
-        return res.status(400).json({ message: "Payment session creation returned no session" })
-      }
+      if (!paymentSession) return res.status(400).json({ message: "Payment session creation returned no session" })
+      tick("fetchPaySession")
+    } else {
+      tick("paySessionExists")
     }
 
-    // ---- Step 3: Authorize payment session if pending ----
+    // Step 3: Authorize
     if (paymentSession.status === "pending") {
-      try {
-        const paymentModuleService = req.scope.resolve("payment") as any
-        await paymentModuleService.authorizePaymentSession(paymentSession.id, {})
-        console.log(`[CustomCheckout] Authorized payment session ${paymentSession.id}`)
-      } catch (authErr: any) {
-        console.error("[CustomCheckout] Failed to authorize payment:", authErr.message)
-        return res.status(400).json({
-          message: "Payment authorization failed",
-          error: authErr.message,
-        })
-      }
+      const paymentModuleService = req.scope.resolve("payment") as any
+      await paymentModuleService.authorizePaymentSession(paymentSession.id, {})
+      tick("authorize")
+    } else {
+      tick("alreadyAuthorized")
     }
 
-    // ---- Step 4: Complete cart → create order ----
-    const { result } = await completeCartWorkflow(req.scope).run({
-      input: { id: cart_id },
-    })
+    // Step 4: Complete cart
+    const { result } = await completeCartWorkflow(req.scope).run({ input: { id: cart_id } })
+    tick("completeCart")
 
-    // Try to get the order from the workflow result
-    let order: any = (result && typeof result === "object" && ("id" in result))
-      ? result
-      : null
+    // Find order
+    let order: any = (result && typeof result === "object" && ("id" in result)) ? result : null
 
-    // If workflow returned empty, try to find the order via remoteQuery
     if (!order) {
       try {
-        const [orderCartLink] = await remoteQuery(remoteQueryObjectFromString({
+        const [ocl] = await remoteQuery(remoteQueryObjectFromString({
           entryPoint: "order_cart",
           variables: { filters: { cart_id } },
           fields: ["order.*", "order.items.*", "order.shipping_address.*"],
         }))
-        if (orderCartLink?.order?.id) {
-          order = orderCartLink.order
-        }
+        if (ocl?.order?.id) order = ocl.order
+        tick("findOrderByLink")
       } catch (e: any) {
-        console.warn("[CustomCheckout] Could not find order via order_cart link:", e.message)
+        tick("findOrderByLinkFailed")
       }
     }
 
-    // Last resort: query orders by email sorted by created_at desc
     if (!order && cart.email) {
       try {
         const { data: recentOrders } = await query.graph({
@@ -153,30 +127,21 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
           filters: { email: cart.email },
           fields: ["id", "display_id", "total", "email", "created_at"],
         })
-        if (recentOrders?.length) {
-          order = recentOrders[0]
-        }
+        if (recentOrders?.length) order = recentOrders[0]
+        tick("findOrderByEmail")
       } catch (e: any) {
-        console.warn("[CustomCheckout] Could not find order by email:", e.message)
+        tick("findOrderByEmailFailed")
       }
     }
 
-    if (!order) {
-      order = { id: `order_from_${cart_id}`, _fromCart: true }
-    }
+    if (!order) order = { id: `order_from_${cart_id}`, _fromCart: true }
 
-    console.log(`[CustomCheckout] Order created:`, order.id)
+    tick("DONE total")
+    console.log(`[Checkout] Order: ${order.id}`)
 
-    return res.status(200).json({
-      type: "order",
-      order,
-    })
+    return res.status(200).json({ type: "order", order })
   } catch (err: any) {
-    console.error("[CustomCheckout] Error:", err.message, err.stack?.slice(0, 500))
-    return res.status(500).json({
-      type: "error",
-      message: err.message || "Checkout failed",
-      code: err.code,
-    })
+    console.error(`[Checkout] ERROR at ${Date.now() - t0}ms:`, err.message, err.stack?.slice(0, 500))
+    return res.status(500).json({ type: "error", message: err.message || "Checkout failed", code: err.code })
   }
 }
