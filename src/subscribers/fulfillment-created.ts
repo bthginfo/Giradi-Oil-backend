@@ -11,31 +11,63 @@ export default async function fulfillmentCreatedHandler({
   try {
     const query = container.resolve("query")
 
-    // Fulfillment-Daten holen
-    const { data: [fulfillment] } = await query.graph({
-      entity: "fulfillment",
-      filters: { id: event.data.id },
-      fields: [
-        "id", "items.*", "labels.*",
-        "order.id", "order.display_id", "order.email", "order.currency_code",
-        "order.items.*", "order.shipping_address.*",
-      ],
-    })
+    // Try to get order_id from event data or via fulfillment link
+    let orderId = (event.data as any).order_id
+    let fulfillmentData: any = null
 
-    if (!fulfillment?.order) {
-      console.warn("⚠️ [Subscriber] Fulfillment or order not found:", event.data.id)
+    if (!orderId) {
+      // Try querying fulfillment directly for order relation
+      try {
+        const { data: [f] } = await query.graph({
+          entity: "fulfillment",
+          filters: { id: event.data.id },
+          fields: ["id", "labels.*"],
+        })
+        fulfillmentData = f
+      } catch (e: any) {
+        console.warn("[Subscriber] Could not query fulfillment:", e.message)
+      }
+
+      // Try order_fulfillment link
+      try {
+        const { data: links } = await query.graph({
+          entity: "order_fulfillment",
+          filters: { fulfillment_id: event.data.id },
+          fields: ["order_id"],
+        })
+        if (links?.[0]?.order_id) orderId = links[0].order_id
+      } catch (e: any) {
+        console.warn("[Subscriber] order_fulfillment link query failed:", e.message)
+      }
+    }
+
+    if (!orderId) {
+      console.warn("⚠️ [Subscriber] Could not find order for fulfillment:", event.data.id)
       return
     }
 
-    const order = fulfillment.order as any
+    // Fetch order details
+    const { data: [order] } = await query.graph({
+      entity: "order",
+      filters: { id: orderId },
+      fields: [
+        "id", "display_id", "email", "currency_code",
+        "items.*", "shipping_address.*",
+      ],
+    })
+
+    if (!order) {
+      console.warn("⚠️ [Subscriber] Order not found:", orderId)
+      return
+    }
     const cc = (order.currency_code || "EUR").toUpperCase()
     const fmt = (cents: number) => Number(cents).toFixed(2).replace(".", ",")
     const addr = order.shipping_address
 
-    // Tracking-Info aus Labels
-    const label = fulfillment.labels?.[0] as any
-    const trackingNumber = label?.tracking_number || null
-    const trackingUrl = label?.tracking_url || null
+    // Tracking-Info aus Labels (from fulfillment query or event data)
+    const label = fulfillmentData?.labels?.[0] as any
+    const trackingNumber = label?.tracking_number || (event.data as any).tracking_number || null
+    const trackingUrl = label?.tracking_url || (event.data as any).tracking_url || null
 
     const trackingHtml = trackingNumber
       ? `<div style="background:#275425;padding:16px;border-radius:8px;margin:24px 0;">

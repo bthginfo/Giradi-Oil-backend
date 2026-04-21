@@ -175,6 +175,21 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
 
     if (!order) order = { id: `order_from_${cart_id}`, _fromCart: true }
 
+    // Save payment method as order metadata for admin visibility
+    if (payment_method && order?.id && !order._fromCart) {
+      try {
+        const orderModule = req.scope.resolve("order") as any
+        if (typeof orderModule.updateOrders === "function") {
+          await orderModule.updateOrders(order.id, { metadata: { payment_method } })
+        } else if (typeof orderModule.update === "function") {
+          await orderModule.update(order.id, { metadata: { payment_method } })
+        }
+        tick("savePaymentMethod")
+      } catch (e: any) {
+        console.warn("[Checkout] Could not save payment_method metadata:", e.message)
+      }
+    }
+
     tick("DONE total")
     console.log(`[Checkout] Order: ${order.id}`)
 

@@ -116,7 +116,22 @@ async function POST(req, res) {
     }
 
     if (!order) order = { id: "order_from_" + cart_id, _fromCart: true };
-    // Step 5: Auto-capture payment for PayPal
+
+    // Save payment method as order metadata for admin visibility
+    if (payment_method && order && order.id && !order._fromCart) {
+      try {
+        var orderModule = req.scope.resolve("order");
+        if (typeof orderModule.updateOrders === "function") {
+          await orderModule.updateOrders(order.id, { metadata: { payment_method: payment_method } });
+        } else if (typeof orderModule.update === "function") {
+          await orderModule.update(order.id, { metadata: { payment_method: payment_method } });
+        }
+        tick("savePaymentMethod");
+      } catch (e) {
+        console.warn("[Checkout] Could not save payment_method metadata:", e.message);
+      }
+    }
+
     tick("DONE total");
     console.log("[Checkout] Order:", order.id);
     // Step 5: Auto-capture PayPal (fire-and-forget, don't block response)
