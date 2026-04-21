@@ -140,14 +140,14 @@ async function POST(req, res) {
 
     // Admin notification email (independent of customer email)
     try {
-    const ADMIN_EMAIL = "julius.voningelheim@tuvsud.com";
+    const ADMIN_EMAIL = "ingelheim.webflow@gmail.com";
     const pmLabel = pm === "paypal" ? "PayPal" : pm === "vorkasse" ? "Vorkasse (\u00dcberweisung)" : pm === "bar" ? "Barzahlung bei Abholung" : pm || "Unbekannt";
     const adminItemRows = (order.items || []).map((item) =>
       '<tr><td style="padding:4px 8px;border:1px solid #ddd;">' + item.title + '</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:center;">' + item.quantity + '</td><td style="padding:4px 8px;border:1px solid #ddd;text-align:right;">' + fmt(Number(item.unit_price||0)*Number(item.quantity||1)) + ' ' + currencyCode + '</td></tr>'
     ).join("");
     const adminHtml = `
     <div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif;padding:20px;">
-      <h2 style="color:#333;">\ud83d\uded2 Neue Bestellung #${order.display_id}</h2>
+      <h2 style="color:#333;">Neue Bestellung #${order.display_id}</h2>
       <table style="width:100%;border-collapse:collapse;margin:16px 0;">
         <tr><td style="padding:6px 0;color:#666;width:140px;">Kunde:</td><td><strong>${addr?.first_name || ba.first_name || ""} ${addr?.last_name || ba.last_name || ""}</strong></td></tr>
         <tr><td style="padding:6px 0;color:#666;">E-Mail:</td><td>${order.email}</td></tr>
@@ -158,7 +158,7 @@ async function POST(req, res) {
       ${isPickup ? `
       <h3 style="color:#666;font-size:14px;">Rechnungsadresse</h3>
       <p style="margin:0;">${ba.first_name||""} ${ba.last_name||""}<br>${ba.address_1||""}<br>${ba.postal_code||""} ${ba.city||""}<br>${(ba.country_code||"").toUpperCase()}</p>
-      <p style="margin:8px 0;color:#d4a017;font-weight:bold;">\ud83d\udccd Abholung in der Werkstatt</p>
+      <p style="margin:8px 0;color:#d4a017;font-weight:bold;">Abholung in der Werkstatt</p>
       ` : `
       <h3 style="color:#666;font-size:14px;">Liefer- & Rechnungsadresse</h3>
       <p style="margin:0;">${addr?.first_name||""} ${addr?.last_name||""}<br>${addr?.address_1||""}<br>${addr?.postal_code||""} ${addr?.city||""}<br>${addr?.country_code?.toUpperCase()||""}</p>
@@ -168,20 +168,20 @@ async function POST(req, res) {
         <tr style="background:#f5f5f5;"><th style="padding:6px 8px;border:1px solid #ddd;text-align:left;">Artikel</th><th style="padding:6px 8px;border:1px solid #ddd;">Menge</th><th style="padding:6px 8px;border:1px solid #ddd;text-align:right;">Summe</th></tr>
         ${adminItemRows}
       </table>
-      ${pm === "vorkasse" ? '<p style="margin-top:16px;padding:12px;background:#fff3cd;border-radius:6px;">\u26a0\ufe0f <strong>Aktion erforderlich:</strong> Zahlungseingang abwarten, dann Payment im Admin capturen.</p>' : ""}
-      ${pm === "bar" ? '<p style="margin-top:16px;padding:12px;background:#fff3cd;border-radius:6px;">\u26a0\ufe0f <strong>Barzahlung:</strong> Betrag bei Abholung kassieren, dann Payment im Admin capturen.</p>' : ""}
+      ${pm === "vorkasse" ? '<p style="margin-top:16px;padding:12px;background:#fff3cd;border-radius:6px;"><strong>Aktion erforderlich:</strong> Zahlungseingang abwarten, dann Payment im Admin capturen.</p>' : ""}
+      ${pm === "bar" ? '<p style="margin-top:16px;padding:12px;background:#fff3cd;border-radius:6px;"><strong>Barzahlung:</strong> Betrag bei Abholung kassieren, dann Payment im Admin capturen.</p>' : ""}
       <p style="margin-top:20px;color:#999;font-size:12px;">
         <a href="https://giradi-backend-svzb.onrender.com/app/orders/${order.id}" style="color:#0070ba;">Order im Admin \u00f6ffnen \u2192</a>
       </p>
     </div>`;
-    (0, mailer_1.sendMail)({
+    await (0, mailer_1.sendMail)({
       to: ADMIN_EMAIL,
-      subject: "\ud83d\uded2 Neue Bestellung #" + order.display_id + " \u2013 " + pmLabel + " \u2013 " + total + " " + currencyCode,
+      subject: "Neue Bestellung #" + order.display_id + " - " + pmLabel + " - " + total + " " + currencyCode,
       html: adminHtml,
-    }).then(() => console.log(`\u2705 Admin email sent to: ${ADMIN_EMAIL}`))
-      .catch((e) => console.error(`\u274c [Admin Mail] Failed to send to ${ADMIN_EMAIL}:`, e.message));
+    });
+    console.log(`\u2705 Admin email sent to: ${ADMIN_EMAIL}`);
     } catch (adminErr) {
-      console.error("\u274c [Admin Mail] Template error:", adminErr.message);
+      console.error(`\u274c [Admin Mail] Failed:`, adminErr.message, adminErr.stack?.slice(0, 200));
     }
 
     console.log(`\u2705 Order confirmation email sent to: ${order.email} \u2013 Total: ${total} ${currencyCode}`);
