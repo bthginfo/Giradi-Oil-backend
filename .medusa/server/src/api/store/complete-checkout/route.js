@@ -41,9 +41,10 @@ async function POST(req, res) {
       tick("updateCartSkipped");
     }
 
-    // Step 0b: Add shipping only if not already set
-    const hasShipping = cartCheck.shipping_methods && cartCheck.shipping_methods.length > 0;
-    if (shipping_option_id && !hasShipping) {
+    // Step 0b: Add/replace shipping if needed
+    const currentShippingOptionId = cartCheck.shipping_methods && cartCheck.shipping_methods[0] && cartCheck.shipping_methods[0].shipping_option_id;
+    const needsShippingUpdate = shipping_option_id && currentShippingOptionId !== shipping_option_id;
+    if (needsShippingUpdate) {
       await (0, core_flows_1.addShippingMethodToCartWorkflow)(req.scope).run({
         input: { cart_id: cart_id, options: [{ id: shipping_option_id }] },
       });

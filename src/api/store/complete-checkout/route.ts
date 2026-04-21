@@ -42,9 +42,10 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
       tick("updateCartSkipped")
     }
 
-    // Step 0b: Add shipping only if not already set
-    const hasShipping = cartCheck.shipping_methods?.length > 0
-    if (shipping_option_id && !hasShipping) {
+    // Step 0b: Add/replace shipping if needed
+    const currentShippingOptionId = cartCheck.shipping_methods?.[0]?.shipping_option_id
+    const needsShippingUpdate = shipping_option_id && currentShippingOptionId !== shipping_option_id
+    if (needsShippingUpdate) {
       await addShippingMethodToCartWorkflow(req.scope).run({
         input: { cart_id, options: [{ id: shipping_option_id }] },
       })
@@ -54,7 +55,7 @@ export async function POST(req: MedusaRequest, res: MedusaResponse) {
     }
 
     // Fetch full cart (re-fetch if we made changes, use cached if not)
-    const needsRefetch = needsUpdate || (shipping_option_id && !hasShipping)
+    const needsRefetch = needsUpdate || needsShippingUpdate
     let cart: any
     if (needsRefetch) {
       const { data: [freshCart] } = await query.graph({
